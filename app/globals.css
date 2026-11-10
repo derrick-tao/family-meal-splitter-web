@@ -1337,3 +1337,157 @@ footer {
     width: 53px;
   }
 }
+.dinner-title-input {
+  font-size: 16px;
+  font-weight: 600;
+}
+.title-helper {
+  margin-bottom: 20px;
+}
+.share-summary-action {
+  margin: 18px 0;
+}
+.share-dinner-button {
+  width: 100%;
+}
+.share-summary-action p {
+  font-size: 11px;
+  color: #65735f;
+  text-align: center;
+  margin-top: 9px;
+  line-height: 1.6;
+}
+.shared-banner {
+  padding: 18px 22px;
+  margin-bottom: 22px;
+  background: #edf5ef;
+  border: 1px solid #cbdccc;
+  border-radius: 14px;
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.shared-banner strong {
+  font-size: 14px;
+}
+.shared-banner p {
+  font-size: 12px;
+  line-height: 1.7;
+  margin-top: 5px;
+}
+.shared-banner details {
+  width: 100%;
+  font-size: 11px;
+  color: #4e6d58;
+}
+.shared-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-left: auto;
+}
+.shared-banner summary,
+.share-limits summary {
+  cursor: pointer;
+}
+.modal {
+  max-height: 90dvh;
+  overflow-y: auto;
+  width: 100%;
+}
+.privacy-choices {
+  margin: 0 0 17px;
+  border: 0;
+  padding: 0;
+}
+.privacy-choices legend {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.privacy-choices label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: #f5f7f0;
+  border: 1px solid #dce4d6;
+  border-radius: 9px;
+  padding: 13px;
+  margin-bottom: 8px;
+  cursor: pointer;
+}
+.privacy-choices input {
+  margin-top: 2px;
+  accent-color: #19796a;
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+}
+.privacy-choices strong {
+  font-size: 12px;
+  display: block;
+}
+.privacy-choices small {
+  font-size: 11px;
+  display: block;
+  color: #65735f;
+  margin-top: 5px;
+  line-height: 1.5;
+}
+.modal .privacy-detail {
+  font-size: 12px;
+  margin: 0 0 14px;
+}
+.share-limits {
+  font-size: 11px;
+  line-height: 1.7;
+  color: #65735f;
+  margin: 14px 0 20px;
+}
+.share-link-label {
+  display: block;
+  font-size: 11px;
+  margin: 16px 0;
+}
+.share-link-label textarea {
+  display: block;
+  width: 100%;
+  height: 90px;
+  padding: 10px;
+  border: 1px solid #dce4d6;
+  border-radius: 8px;
+  margin-top: 8px;
+  font-size: 12px;
+  resize: vertical;
+  overflow-wrap: anywhere;
+}
+.shared-banner,
+.message-preview p,
+.summary-row b,
+.household-top .input,
+.child-name .input,
+#split-heading {
+  unicode-bidi: isolate;
+  overflow-wrap: anywhere;
+}
+#split-heading {
+  max-width: 340px;
+}
+@media (max-width: 680px) {
+  .shared-banner {
+    padding: 16px;
+  }
+  .shared-actions {
+    margin-left: 0;
+  }
+  .modal {
+    padding: 22px;
+  }
+  .modal p {
+    font-size: 12px;
+  }
+  .privacy-choices label {
+    padding: 12px;
+  }
+}

@@ -15,6 +15,24 @@ Open http://localhost:3000. Start with a clean bill or choose **Load Example Din
 
 The bill and tone persist only in this browser's localStorage. Private browsing, browser storage policies, or clearing site data may prevent persistence. Names and bill data are never sent to an analytics service. Clipboard copying requires HTTPS or localhost and browser permission; the preview can also be selected and copied manually. Reset and example replacement ask for confirmation when existing data would be replaced.
 
+## Share a configured dinner
+
+Give your bill a **Dinner title**, configure the households and portions, then choose **Share dinner**. The privacy dialog defaults to children's initials; **Keep names as entered** is optional. Both modes retain ages. Household names and the dinner title remain unchanged. The choice changes only the outgoing snapshot, never your names in the editor.
+
+The copied link contains a fixed, editable snapshot in its URL fragment. There is no shared server record: old links never update, and a recipient can edit locally and share a new link back. Names omitted by an initials-only link cannot be recovered. Ages remain excluded from the generated group text.
+
+This browser retains your ordinary dinner and the most recently edited shared dinner separately. Refreshing the matching link resumes your local edits. After you edit another shared dinner, opening an older link restores its original snapshot. **Reload original snapshot** confirms before discarding edits; **Open my saved dinner** returns to your ordinary draft. Legacy saved dinners receive the default title without losing their other values. Invalid saved data is left untouched until you deliberately reset or recover it.
+
+Anyone with a link can read or change its contents. Encoding is not encryption or proof of identity. Links can remain in browser history and messages and cannot be individually revoked. Local storage is unencrypted; all projects under the same `derrick-tao.github.io` origin share access to it. Initials do not guarantee anonymity.
+
+## Sharing security
+
+See [the approved requirements](docs/sharing-requirements.md). Version 1 has one `#share=v1.<unpadded-base64url>` payload containing uncompressed UTF-8 JSON. It accepts only the documented version, object fields, numeric ranges, and name/ID types. It rejects noncanonical encoding, invalid UTF-8, unknown/prototype-related keys, unexpected nesting, controls and explicit bidi controls, and malformed data without overwriting drafts. Normal multilingual letters, emoji, combining marks, apostrophes, and hyphens remain supported. Names and titles render as React text and never become HTML, CSS, scripts, or navigation destinations. Shared identifiers are regenerated without names.
+
+Sharing limits are 8,000 URL characters, 256 KiB decoded bytes (the URL limit yields a much smaller effective v1 payload), 200 households plus children, depth eight, and 120 Unicode characters per name/title. Each local draft slot has a 1 MiB serialized limit; incomplete amount input may still be restored and edited. Oversized/invalid links and failed storage writes preserve existing data. No dinner details are logged, analyzed, shortened externally, or sent to an application backend.
+
+The static Pages build adds an early Content Security Policy to every exported HTML page. Inline Next.js hydration scripts use exact build-generated SHA-256 hashes; scripts cannot use `unsafe-inline` or `unsafe-eval`. Numeric progress styling has a separate inline-style allowance. Meta CSP cannot set HSTS or `frame-ancestors`; no such host-level protection is claimed. Context-safe rendering and schema validation remain the primary input defenses.
+
 ## Checks
 
 ```sh
@@ -34,9 +52,20 @@ npm run format
 npm run start
 ```
 
+For browser tests against an exported Pages build, serve `out/` under the repository path (see below), then run:
+
+```sh
+PLAYWRIGHT_EXTERNAL_SERVER=1 PLAYWRIGHT_BASE_URL=http://127.0.0.1:8081/family-meal-splitter-web/ npm run test:e2e
+```
+
+The external-server mode tests the actual static export and its generated CSP. The default browser-test mode starts a normal Next production server.
+
 ## Calculation and code structure
 
 - `lib/meal.ts`: types, age defaults, state validation, pure child update helpers, USD input parsing, exact cent allocation, example fixture, and message generation.
+- `lib/sharing.ts` and `lib/validation.ts`: strict share codec, privacy transformation, schema reconstruction, and draft validation.
+- `hooks/use-dinner.ts`: separate ordinary/shared local drafts and safe navigation/recovery.
+- `scripts/static-csp.mjs`: build-time CSP hashing and insertion for static Pages.
 - `components/meal-splitter.tsx`: responsive editor, dashboard, localStorage, confirmations, and clipboard flow.
 - `components/ui/`: local, editable shadcn-style button and input primitives.
 - `app/globals.css`: Tailwind integration and responsive visual styles.
@@ -51,7 +80,7 @@ USD inputs accept nonnegative decimal amounts with at most two fractional digits
 
 ## Verification
 
-Validated in the implementation environment: 23 unit tests and four Playwright flows (two each on desktop and mobile), formatting, ESLint, TypeScript, and a production build. The build uses Webpack because the managed environment restricts Turbopack’s internal port binding. Next.js is configured to use the TypeScript compiler API with TypeScript 5.
+Validation covers unit tests, desktop and mobile Playwright flows, formatting, ESLint, TypeScript, and production builds. The build uses Webpack because the managed environment restricts Turbopack’s internal port binding. Next.js is configured to use the TypeScript compiler API with TypeScript 5.
 
 ## GitHub Pages
 

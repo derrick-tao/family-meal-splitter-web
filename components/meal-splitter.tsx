@@ -15,12 +15,17 @@ import {
   RotateCcw,
   ShieldCheck,
   Sparkles,
+  Share2,
   Trash2,
   Users,
   Utensils,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Dialog } from "@/components/dialog";
+import { useDinner } from "@/hooks/use-dinner";
+import { createShareUrl, type NamePrivacy } from "@/lib/sharing";
+import { isSafeText } from "@/lib/validation";
 import {
   allocate,
   ageDefault,
@@ -30,67 +35,44 @@ import {
   generateMessage,
   householdName,
   householdWeight,
-  isBill,
+  billTitle,
+  DEFAULT_TITLE,
   money,
   parseCents,
   resetChild,
-  STORAGE_KEY,
   updateChild,
-  type Bill,
   type Child,
   type Household,
   type Allocation,
 } from "@/lib/meal";
 const colors = ["teal", "coral", "gold", "purple"];
 export default function MealSplitter() {
-  const [bill, setBill] = useState<Bill>(cleanBill);
-  const [ready, setReady] = useState(false);
+  const {
+    bill,
+    setBill,
+    ready,
+    shared,
+    warning: storageWarning,
+    blocked,
+    linkError,
+    locallyEdited,
+    replaceBill,
+    reloadOriginal,
+    openSaved,
+  } = useDinner();
   const [notice, setNotice] = useState("");
-  const [storageWarning, setStorageWarning] = useState("");
-  const [confirm, setConfirm] = useState<"reset" | "example" | null>(null);
-  /* eslint-disable react-hooks/set-state-in-effect -- Hydrate browser-only storage after SSR, then surface storage write errors. The ready flag prevents overwriting saved data before hydration. */
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed: unknown = JSON.parse(saved);
-        if (isBill(parsed)) setBill(parsed);
-        else
-          setStorageWarning(
-            "Saved data could not be restored. You can start a new bill.",
-          );
-      }
-    } catch {
-      setStorageWarning(
-        "Browser storage is unavailable. Keep this page open to preserve your bill.",
-      );
-    }
-    setReady(true);
-  }, []);
-  useEffect(() => {
-    if (ready)
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(bill));
-      } catch {
-        setStorageWarning(
-          "Changes cannot be saved in this browser. Keep this page open.",
-        );
-      }
-  }, [bill, ready]);
-  /* eslint-enable react-hooks/set-state-in-effect */
+  const [confirm, setConfirm] = useState<
+    "reset" | "example" | "original" | null
+  >(null);
+  const [sharing, setSharing] = useState(false);
+  const [privacy, setPrivacy] = useState<NamePrivacy>("initials");
+  const [shareLink, setShareLink] = useState("");
+  const [shareError, setShareError] = useState("");
   useEffect(() => {
     if (!notice) return;
     const timer = setTimeout(() => setNotice(""), 3500);
     return () => clearTimeout(timer);
   }, [notice]);
-  useEffect(() => {
-    if (!confirm) return;
-    const handle = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setConfirm(null);
-    };
-    window.addEventListener("keydown", handle);
-    return () => window.removeEventListener("keydown", handle);
-  }, [confirm]);
   const cents = parseCents(bill.amount);
   let rows: Allocation[] = [];
   let error = "";
@@ -111,10 +93,20 @@ export default function MealSplitter() {
     0,
   );
   const message = generateMessage(bill, rows);
+  const messageInputsSafe =
+    isSafeText(bill.title, 120) &&
+    bill.households.every(
+      (h) =>
+        isSafeText(h.name, 1048576) &&
+        h.children.every((c) => isSafeText(c.name, 1048576)),
+    );
   const edited =
     bill.households.length > 0 ||
     (bill.amount !== "" && bill.amount !== "0.00") ||
-    bill.tone !== "fun";
+    bill.tone !== "fun" ||
+    bill.title !== DEFAULT_TITLE ||
+    !!storageWarning ||
+    !!linkError;
   function patchHouse(id: string, patch: Partial<Household>) {
     setBill((b) => ({
       ...b,
@@ -179,6 +171,10 @@ export default function MealSplitter() {
     }));
   }
   async function copy() {
+    if (!messageInputsSafe) {
+      setNotice("Remove unsupported control characters before copying.");
+      return;
+    }
     try {
       await navigator.clipboard.writeText(message);
       setNotice("Message copied! Ready for the group chat.");
@@ -190,13 +186,46 @@ export default function MealSplitter() {
   }
   function requestAction(action: "reset" | "example") {
     if (edited) setConfirm(action);
-    else setBill(action === "reset" ? cleanBill() : exampleBill());
+    else replaceBill(action === "reset" ? cleanBill() : exampleBill());
   }
+  async function copyShare() {
+    setShareError("");
+    try {
+      const base = (process.env.NEXT_PUBLIC_BASE_PATH || "") + "/";
+      const url = createShareUrl(bill, privacy, window.location.origin, base);
+      setShareLink(url);
+      try {
+        await navigator.clipboard.writeText(url);
+        setNotice("Share link copied! This link contains a fixed snapshot.");
+      } catch {
+        setShareError(
+          "Copy unavailable. Select the link below and copy it manually.",
+        );
+      }
+    } catch (e) {
+      setShareError((e as Error).message);
+      setShareLink("");
+    }
+  }
+  function openShare() {
+    setPrivacy("initials");
+    setShareLink("");
+    setShareError("");
+    setSharing(true);
+  }
+  const safeInput = (value: string, max = 1048576) => isSafeText(value, max);
   return (
     <>
       <header className="site-header">
         <div className="header-inner">
-          <a className="brand" href="#">
+          <a
+            className="brand"
+            href="#"
+            onClick={(e) => {
+              e.preventDefault();
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }}
+          >
             <span className="brand-icon">
               <Utensils size={22} />
             </span>
@@ -239,6 +268,52 @@ export default function MealSplitter() {
             {storageWarning}
           </p>
         )}
+        {linkError && (
+          <div className="warning" role="alert">
+            <p>{linkError}</p>
+            <Button variant="outline" onClick={openSaved}>
+              Open my saved dinner
+            </Button>
+          </div>
+        )}
+        {shared && (
+          <section className="shared-banner" aria-label="Shared dinner status">
+            <div>
+              <strong>
+                {locallyEdited ? "Your edited local copy" : "Shared snapshot"}
+              </strong>
+              <p>
+                Changes stay on this device. Share a new link to send updates.
+              </p>
+            </div>
+            <div className="shared-actions">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  locallyEdited
+                    ? setConfirm("original")
+                    : setNotice("Already showing the original snapshot.")
+                }
+              >
+                Reload original snapshot
+              </Button>
+              <Button variant="ghost" size="sm" onClick={openSaved}>
+                Open my saved dinner
+              </Button>
+            </div>
+            <details>
+              <summary>About saved shared dinners</summary>
+              <p>
+                Your ordinary saved dinner is kept separately. This browser
+                remembers only the most recently edited shared dinner.
+                Refreshing its link restores your edits; after editing another
+                shared dinner, an older link opens its original snapshot. Anyone
+                can change a snapshot; it does not verify who created it.
+              </p>
+            </details>
+          </section>
+        )}
         <div className="workspace">
           <div className="editor">
             <section className="card bill-card" aria-labelledby="bill-heading">
@@ -260,6 +335,24 @@ export default function MealSplitter() {
                   <RotateCcw size={14} /> Reset
                 </Button>
               </div>
+              <label htmlFor="dinner-title" className="field-label">
+                Dinner title
+              </label>
+              <Input
+                id="dinner-title"
+                className="dinner-title-input"
+                value={bill.title}
+                placeholder={DEFAULT_TITLE}
+                onChange={(e) => {
+                  if (safeInput(e.target.value, 120))
+                    setBill({ ...bill, title: e.target.value });
+                }}
+                aria-describedby="title-help"
+              />
+              <p id="title-help" className="helper title-helper">
+                Shown in your split, message, and shared dinner. Up to 120
+                characters.
+              </p>
               <label htmlFor="bill-amount" className="field-label">
                 Total bill amount
               </label>
@@ -271,7 +364,10 @@ export default function MealSplitter() {
                   id="bill-amount"
                   inputMode="decimal"
                   value={bill.amount}
-                  onChange={(e) => setBill({ ...bill, amount: e.target.value })}
+                  onChange={(e) => {
+                    if (safeInput(e.target.value, 128))
+                      setBill({ ...bill, amount: e.target.value });
+                  }}
                   onBlur={() => {
                     if (cents !== null)
                       setBill((b) => ({
@@ -298,7 +394,13 @@ export default function MealSplitter() {
                 </span>
                 <span className="autosaved">
                   <Check size={13} />
-                  {ready ? "Saved on this device" : "Loading…"}
+                  {!ready
+                    ? "Loading…"
+                    : storageWarning || blocked || linkError
+                      ? "Not saved"
+                      : shared && !locallyEdited
+                        ? "Snapshot loaded"
+                        : "Saved on this device"}
                 </span>
               </div>
             </section>
@@ -310,7 +412,16 @@ export default function MealSplitter() {
                 </h2>
                 <p>Who’s joining for dinner?</p>
               </div>
-              <a href="#your-split" className="mobile-summary">
+              <a
+                href="#your-split"
+                className="mobile-summary"
+                onClick={(e) => {
+                  e.preventDefault();
+                  document
+                    .getElementById("your-split")
+                    ?.scrollIntoView({ behavior: "smooth" });
+                }}
+              >
                 View split <ArrowDown size={14} />
               </a>
             </div>
@@ -346,7 +457,9 @@ export default function MealSplitter() {
                       aria-label={`Household ${i + 1} name`}
                       placeholder={`Household ${i + 1}`}
                       value={h.name}
+                      dir="auto"
                       onChange={(e) =>
+                        safeInput(e.target.value) &&
                         patchHouse(h.id, { name: e.target.value })
                       }
                     />
@@ -428,7 +541,9 @@ export default function MealSplitter() {
                           <Input
                             placeholder={`Child ${j + 1}`}
                             value={c.name}
+                            dir="auto"
                             onChange={(e) =>
+                              safeInput(e.target.value) &&
                               patchChild(h.id, c.id, { name: e.target.value })
                             }
                           />
@@ -567,7 +682,9 @@ export default function MealSplitter() {
                     <span aria-hidden="true">$</span>
                   </span>
                   <div>
-                    <h2 id="split-heading">Your dinner split</h2>
+                    <h2 id="split-heading" dir="auto">
+                      {billTitle(bill)}
+                    </h2>
                     <p>A fair share for every household.</p>
                   </div>
                 </div>
@@ -601,7 +718,7 @@ export default function MealSplitter() {
                       <div className="summary-row" key={h.id}>
                         <div>
                           <span className={`color-dot ${colors[i % 4]}`} />
-                          <b>{householdName(h, i)}</b>
+                          <b dir="auto">{householdName(h, i)}</b>
                           <span className="weight-label">
                             {householdWeight(h)}%
                           </span>
@@ -628,6 +745,18 @@ export default function MealSplitter() {
                   <p>{totalWeight}% combined portions</p>
                 </div>
                 <strong>{cents === null ? "—" : money(cents)}</strong>
+              </div>
+              <div className="share-summary-action">
+                <Button
+                  className="share-dinner-button"
+                  onClick={openShare}
+                  disabled={
+                    !ready || !!linkError || !!error || !bill.households.length
+                  }
+                >
+                  <Share2 size={17} /> Share dinner
+                </Button>
+                <p>Send a snapshot others can edit in their own browser.</p>
               </div>
               <div className="rounding-note">
                 <ShieldCheck size={14} />
@@ -706,7 +835,12 @@ export default function MealSplitter() {
               </div>
               <Button
                 className="copy-button"
-                disabled={!ready || !!error || !bill.households.length}
+                disabled={
+                  !ready ||
+                  !!error ||
+                  !bill.households.length ||
+                  !messageInputsSafe
+                }
                 onClick={copy}
               >
                 <Copy size={17} /> 📋 Copy Message
@@ -744,61 +878,148 @@ export default function MealSplitter() {
         </div>
       )}
       {confirm && (
-        <div className="modal-backdrop" onClick={() => setConfirm(null)}>
-          <div
-            className="modal card"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="confirm-title"
-            onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => {
-              if (e.key === "Tab") {
-                const buttons = e.currentTarget.querySelectorAll("button");
-                if (e.shiftKey && document.activeElement === buttons[0]) {
-                  e.preventDefault();
-                  buttons[1].focus();
-                } else if (
-                  !e.shiftKey &&
-                  document.activeElement === buttons[1]
-                ) {
-                  e.preventDefault();
-                  buttons[0].focus();
-                }
-              }
-            }}
-          >
-            <span className="icon-box coral">
-              <RotateCcw size={21} />
-            </span>
-            <h2 id="confirm-title">
-              {confirm === "reset"
-                ? "Start a fresh dinner?"
+        <Dialog titleId="confirm-title" onClose={() => setConfirm(null)}>
+          <span className="icon-box coral">
+            <RotateCcw size={21} />
+          </span>
+          <h2 id="confirm-title">
+            {confirm === "reset"
+              ? "Start a fresh dinner?"
+              : confirm === "original"
+                ? "Reload the original snapshot?"
                 : "Load the example dinner?"}
-            </h2>
-            <p>
+          </h2>
+          <p>
+            {confirm === "reset"
+              ? "This will clear the currently open dinner and replace its local draft. Your other saved dinner is kept separately."
+              : confirm === "original"
+                ? "This discards your edits to this shared copy and restores the values in the original link."
+                : "This will replace the currently open dinner with the fictional four-family dinner."}
+          </p>
+          <div>
+            <Button
+              variant="outline"
+              data-autofocus
+              onClick={() => setConfirm(null)}
+            >
+              Keep my dinner
+            </Button>
+            <Button
+              onClick={() => {
+                if (confirm === "original") reloadOriginal();
+                else
+                  replaceBill(
+                    confirm === "reset" ? cleanBill() : exampleBill(),
+                  );
+                setConfirm(null);
+              }}
+            >
               {confirm === "reset"
-                ? "This will clear your bill and all households saved on this device."
-                : "This will replace your current bill and households with the fictional four-family dinner."}
-            </p>
-            <div>
-              <Button
-                variant="outline"
-                autoFocus
-                onClick={() => setConfirm(null)}
-              >
-                Keep my dinner
-              </Button>
-              <Button
-                onClick={() => {
-                  setBill(confirm === "reset" ? cleanBill() : exampleBill());
-                  setConfirm(null);
-                }}
-              >
-                {confirm === "reset" ? "Reset dinner" : "Load example"}
-              </Button>
-            </div>
+                ? "Reset dinner"
+                : confirm === "original"
+                  ? "Reload original"
+                  : "Load example"}
+            </Button>
           </div>
-        </div>
+        </Dialog>
+      )}
+      {sharing && (
+        <Dialog titleId="share-title" onClose={() => setSharing(false)}>
+          <span className="icon-box teal">
+            <Share2 size={21} />
+          </span>
+          <h2 id="share-title">Share this dinner</h2>
+          <p>
+            This link includes the dinner title, household names, children’s
+            ages, and either their names or initials. This app does not store
+            dinner details on a server. Your browser saves your draft, and the
+            link itself contains the snapshot. Anyone with the link can read its
+            contents.
+          </p>
+          <fieldset className="privacy-choices">
+            <legend>Children’s names in this link</legend>
+            <label>
+              <input
+                type="radio"
+                name="share-privacy"
+                value="initials"
+                checked={privacy === "initials"}
+                onChange={() => {
+                  setPrivacy("initials");
+                  setShareLink("");
+                  setShareError("");
+                }}
+              />{" "}
+              <span>
+                <strong>Use children’s initials</strong>
+                <small>For example, Child A1 becomes C. A.</small>
+              </span>
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="share-privacy"
+                value="entered"
+                checked={privacy === "entered"}
+                onChange={() => {
+                  setPrivacy("entered");
+                  setShareLink("");
+                  setShareError("");
+                }}
+              />{" "}
+              <span>
+                <strong>Keep names as entered</strong>
+                <small>Include the names currently shown in the editor.</small>
+              </span>
+            </label>
+          </fieldset>
+          <p className="privacy-detail">
+            <strong>Ages stay included in both options.</strong> Household names
+            and the dinner title stay as entered. Initials do not make a dinner
+            anonymous.
+            {bill.households.every((h) => h.children.length === 0)
+              ? " This dinner has no child names to abbreviate."
+              : ""}
+          </p>
+          <details className="share-limits">
+            <summary>How this link works</summary>
+            <p>
+              The snapshot is encoded, not encrypted. It can remain in browser
+              history and messages. Existing links do not update and cannot be
+              individually revoked. Other apps on this GitHub Pages origin share
+              browser storage; drafts are not encrypted. Initials already
+              received cannot reveal full names that were not included.
+            </p>
+          </details>
+          {shareError && (
+            <p role="alert" className="warning">
+              {shareError}
+            </p>
+          )}
+          {shareLink && (
+            <label className="share-link-label">
+              Share link
+              <textarea
+                readOnly
+                aria-label="Share link"
+                value={shareLink}
+                onFocus={(e) => e.target.select()}
+              />
+            </label>
+          )}
+          <div>
+            <Button
+              variant="outline"
+              data-autofocus
+              onClick={() => setSharing(false)}
+            >
+              Cancel
+            </Button>
+            <Button onClick={copyShare}>
+              <Copy size={16} /> Copy share link
+            </Button>
+          </div>
+        </Dialog>
       )}
     </>
   );

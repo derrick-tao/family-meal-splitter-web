@@ -1,3 +1,5 @@
+import { DEFAULT_TITLE, readBill } from "./validation";
+export { DEFAULT_TITLE } from "./validation";
 export type PercentageOverride = boolean;
 export type AdultCount = number;
 export interface Child {
@@ -15,6 +17,7 @@ export interface Household {
 }
 export type Tone = "fun" | "simple";
 export interface Bill {
+  title: string;
   amount: string;
   households: Household[];
   tone: Tone;
@@ -30,6 +33,7 @@ export const money = (cents: number) =>
     cents / 100,
   );
 export const cleanBill = (): Bill => ({
+  title: DEFAULT_TITLE,
   amount: "0.00",
   households: [],
   tone: "fun",
@@ -110,10 +114,12 @@ export function generateMessage(bill: Bill, rows: Allocation[]): string {
     return "Add households and their portions to prepare your message.";
   const fun = bill.tone === "fun";
   const intro = fun
-    ? "🎉🍽️ Dinner Bill Breakdown!\n\nHi everyone! 👋 Our dinner together came to " +
+    ? `🎉🍽️ ${billTitle(bill)} — Bill Breakdown!\n\nHi everyone! 👋 Our dinner together came to ` +
       money(cents) +
       "! 🥗"
-    : "Dinner bill breakdown\n\nTotal dinner bill: " + money(cents);
+    : billTitle(bill) +
+      " — Bill breakdown\n\nTotal dinner bill: " +
+      money(cents);
   const details = bill.households
     .map(
       (h, i) =>
@@ -125,6 +131,7 @@ export function generateMessage(bill: Bill, rows: Allocation[]): string {
 export function exampleBill(): Bill {
   const specs = [[4, 6], [], [4, 8, 10], [2, 5]];
   return {
+    title: DEFAULT_TITLE,
     amount: "254.74",
     tone: "fun",
     households: specs.map((ages, i) => ({
@@ -142,38 +149,11 @@ export function exampleBill(): Bill {
   };
 }
 export function isBill(value: unknown): value is Bill {
-  if (!value || typeof value !== "object") return false;
-  const b = value as Bill;
-  const ids = new Set<string>();
-  const validId = (id: unknown) => {
-    if (typeof id !== "string" || !id || ids.has(id)) return false;
-    ids.add(id);
+  try {
+    readBill(value);
     return true;
-  };
-  return (
-    typeof b.amount === "string" &&
-    ["fun", "simple"].includes(b.tone) &&
-    Array.isArray(b.households) &&
-    b.households.every(
-      (h) =>
-        validId(h.id) &&
-        typeof h.name === "string" &&
-        Number.isInteger(h.adults) &&
-        h.adults >= 0 &&
-        h.adults <= 1000 &&
-        Array.isArray(h.children) &&
-        h.children.every(
-          (c) =>
-            validId(c.id) &&
-            typeof c.name === "string" &&
-            (c.age === null ||
-              (Number.isInteger(c.age) && c.age >= 0 && c.age <= 17)) &&
-            Number.isInteger(c.percentage) &&
-            c.percentage >= 0 &&
-            c.percentage <= 100 &&
-            c.percentage % 5 === 0 &&
-            typeof c.overridden === "boolean",
-        ),
-    )
-  );
+  } catch {
+    return false;
+  }
 }
+export const billTitle = (bill: Bill) => bill.title.trim() || DEFAULT_TITLE;

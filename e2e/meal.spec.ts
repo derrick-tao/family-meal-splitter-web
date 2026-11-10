@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 test("build a dinner, adjust independent portions, copy, and restore", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("./");
   await page.getByLabel("Total bill amount").fill("100.01");
   await page
     .getByRole("button", { name: "Add Household", exact: true })
@@ -56,7 +56,7 @@ test("build a dinner, adjust independent portions, copy, and restore", async ({
 test("example dinner and slider update; reset can be cancelled", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("./");
   await page.getByRole("button", { name: "Load Example Dinner" }).click();
   for (const [i, amount] of ["$62.67", "$40.44", "$90.98", "$60.65"].entries())
     await expect(page.getByTestId(`payment-${i}`)).toHaveText(amount);
