@@ -1,0 +1,179 @@
+export type PercentageOverride = boolean;
+export type AdultCount = number;
+export interface Child {
+  id: string;
+  name: string;
+  age: number | null;
+  percentage: number;
+  overridden: PercentageOverride;
+}
+export interface Household {
+  id: string;
+  name: string;
+  adults: AdultCount;
+  children: Child[];
+}
+export type Tone = "fun" | "simple";
+export interface Bill {
+  amount: string;
+  households: Household[];
+  tone: Tone;
+}
+export interface Allocation {
+  id: string;
+  weight: number;
+  cents: number;
+}
+export const STORAGE_KEY = "family-meal-splitter-v1";
+export const money = (cents: number) =>
+  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(
+    cents / 100,
+  );
+export const cleanBill = (): Bill => ({
+  amount: "0.00",
+  households: [],
+  tone: "fun",
+});
+export function ageDefault(age: number | null): number {
+  if (age === null || !Number.isInteger(age) || age < 0 || age > 17) return 0;
+  return [
+    0, 10, 20, 25, 25, 30, 30, 35, 40, 50, 60, 70, 80, 90, 100, 100, 100, 100,
+  ][age];
+}
+export function updateChild(child: Child, patch: Partial<Child>): Child {
+  const next = { ...child, ...patch };
+  if ("percentage" in patch) next.overridden = true;
+  if ("age" in patch && !next.overridden)
+    next.percentage = ageDefault(next.age);
+  return next;
+}
+export const resetChild = (child: Child): Child => ({
+  ...child,
+  percentage: ageDefault(child.age),
+  overridden: false,
+});
+export function parseCents(value: string): number | null {
+  if (value.trim() === "") return 0;
+  if (!/^\d+(\.\d{0,2})?$/.test(value)) return null;
+  const [whole, fraction = ""] = value.split(".");
+  const cents = Number(whole) * 100 + Number(fraction.padEnd(2, "0"));
+  return Number.isSafeInteger(cents) && cents <= 99999999999 ? cents : null;
+}
+export const householdWeight = (h: Household) =>
+  h.adults * 100 + h.children.reduce((sum, c) => sum + c.percentage, 0);
+export function allocate(cents: number, households: Household[]): Allocation[] {
+  if (!Number.isSafeInteger(cents) || cents < 0)
+    throw new Error("Enter a valid bill amount.");
+  const weights = households.map(householdWeight);
+  if (weights.some((w) => !Number.isSafeInteger(w) || w < 0))
+    throw new Error("Portions must be nonnegative integers.");
+  const total = weights.reduce((a, b) => a + b, 0);
+  if (!Number.isSafeInteger(total))
+    throw new Error("The total portion is too large.");
+  if (!total && cents)
+    throw new Error(
+      "Add at least one adult or a child with a portion above 0% to split the bill.",
+    );
+  const denominator = BigInt(total || 1);
+  const rows = weights.map((weight, i) => {
+    const numerator = BigInt(cents) * BigInt(weight);
+    return {
+      id: households[i].id,
+      weight,
+      cents: Number(numerator / denominator),
+      remainder: numerator % denominator,
+      index: i,
+    };
+  });
+  const remaining = cents - rows.reduce((sum, r) => sum + r.cents, 0);
+  [...rows]
+    .sort((a, b) =>
+      a.remainder === b.remainder
+        ? a.index - b.index
+        : a.remainder > b.remainder
+          ? -1
+          : 1,
+    )
+    .slice(0, remaining)
+    .forEach((r) => r.cents++);
+  return rows.map(({ id, weight, cents }) => ({ id, weight, cents }));
+}
+export const householdName = (h: Household, i: number) =>
+  h.name.trim() || `Household ${i + 1}`;
+export const childName = (c: Child, i: number) =>
+  c.name.trim() || `Child ${i + 1}`;
+export function generateMessage(bill: Bill, rows: Allocation[]): string {
+  const cents = parseCents(bill.amount);
+  if (cents === null)
+    return "Enter a valid bill amount to prepare your message.";
+  if (!bill.households.length || (cents > 0 && !rows.length))
+    return "Add households and their portions to prepare your message.";
+  const fun = bill.tone === "fun";
+  const intro = fun
+    ? "🎉🍽️ Dinner Bill Breakdown!\n\nHi everyone! 👋 Our dinner together came to " +
+      money(cents) +
+      "! 🥗"
+    : "Dinner bill breakdown\n\nTotal dinner bill: " + money(cents);
+  const details = bill.households
+    .map(
+      (h, i) =>
+        `${fun ? "🏡 " : ""}${householdName(h, i)} — ${money(rows[i]?.cents ?? 0)}\nAdults: ${h.adults} × 100% = ${h.adults * 100}%${h.children.map((c, j) => `\n${fun ? "🧒 " : ""}${childName(c, j)}: ${c.percentage}%`).join("")}`,
+    )
+    .join("\n\n");
+  return `${intro}\n\nEvery adult counts as 100%. Children’s percentages are adjustable estimates of how much they ate relative to an adult portion. ${fun ? "🍴✨" : ""}\n\n${details}\n\n${fun ? "💰 " : ""}GRAND TOTAL: ${money(cents)}${fun ? " ✅" : ""}\n\nEach household pays in proportion to its combined portions. Whole-cent rounding makes the payments add up exactly.\n\n${fun ? "💕 Thanks for the food, laughter, and lovely company! Until our next dinner! 😋🎉" : "Thank you for a lovely dinner together!"} `.trim();
+}
+export function exampleBill(): Bill {
+  const specs = [[4, 6], [], [4, 8, 10], [2, 5]];
+  return {
+    amount: "254.74",
+    tone: "fun",
+    households: specs.map((ages, i) => ({
+      id: `example-${i}`,
+      name: `Family ${"ABCD"[i]}`,
+      adults: 1,
+      children: ages.map((age, j) => ({
+        id: `example-${i}-${j}`,
+        name: `Child ${"ABCD"[i]}${j + 1}`,
+        age,
+        percentage: ageDefault(age),
+        overridden: false,
+      })),
+    })),
+  };
+}
+export function isBill(value: unknown): value is Bill {
+  if (!value || typeof value !== "object") return false;
+  const b = value as Bill;
+  const ids = new Set<string>();
+  const validId = (id: unknown) => {
+    if (typeof id !== "string" || !id || ids.has(id)) return false;
+    ids.add(id);
+    return true;
+  };
+  return (
+    typeof b.amount === "string" &&
+    ["fun", "simple"].includes(b.tone) &&
+    Array.isArray(b.households) &&
+    b.households.every(
+      (h) =>
+        validId(h.id) &&
+        typeof h.name === "string" &&
+        Number.isInteger(h.adults) &&
+        h.adults >= 0 &&
+        h.adults <= 1000 &&
+        Array.isArray(h.children) &&
+        h.children.every(
+          (c) =>
+            validId(c.id) &&
+            typeof c.name === "string" &&
+            (c.age === null ||
+              (Number.isInteger(c.age) && c.age >= 0 && c.age <= 17)) &&
+            Number.isInteger(c.percentage) &&
+            c.percentage >= 0 &&
+            c.percentage <= 100 &&
+            c.percentage % 5 === 0 &&
+            typeof c.overridden === "boolean",
+        ),
+    )
+  );
+}
