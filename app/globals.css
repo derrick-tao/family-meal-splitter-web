@@ -1491,3 +1491,15 @@ footer {
     padding: 12px;
   }
 }
+
+.editor-fields {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.editor-fields:disabled input {
+  opacity: 1;
+  color: inherit;
+  -webkit-text-fill-color: currentColor;
+}

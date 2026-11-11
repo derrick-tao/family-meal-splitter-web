@@ -53,17 +53,20 @@ export default function MealSplitter() {
     ready,
     shared,
     warning: storageWarning,
+    actionWarning,
     blocked,
     linkError,
-    locallyEdited,
+    session,
+    legacy,
+    readOnly,
     replaceBill,
-    reloadOriginal,
+    resetChanges,
+    createLocal,
+    viewOriginal,
     openSaved,
   } = useDinner();
   const [notice, setNotice] = useState("");
-  const [confirm, setConfirm] = useState<
-    "reset" | "example" | "original" | null
-  >(null);
+  const [confirm, setConfirm] = useState<"reset" | "example" | null>(null);
   const [sharing, setSharing] = useState(false);
   const [privacy, setPrivacy] = useState<NamePrivacy>("initials");
   const [shareLink, setShareLink] = useState("");
@@ -185,6 +188,11 @@ export default function MealSplitter() {
     }
   }
   function requestAction(action: "reset" | "example") {
+    if (readOnly) return;
+    if (action === "reset" && session) {
+      setConfirm(action);
+      return;
+    }
     if (edited) setConfirm(action);
     else replaceBill(action === "reset" ? cleanBill() : exampleBill());
   }
@@ -254,10 +262,12 @@ export default function MealSplitter() {
             <span>
               Big appetites or little bites. There’s room for everyone.
             </span>
-            <Button variant="ghost" onClick={() => requestAction("example")}>
-              <Sparkles size={15} /> Load Example Dinner{" "}
-              <ArrowUpRight size={14} />
-            </Button>
+            {!readOnly && (
+              <Button variant="ghost" onClick={() => requestAction("example")}>
+                <Sparkles size={15} /> Load Example Dinner{" "}
+                <ArrowUpRight size={14} />
+              </Button>
+            )}
           </div>
           <div className="hero-doodle" aria-hidden="true">
             🍽️<span>♡</span>
@@ -268,597 +278,673 @@ export default function MealSplitter() {
             {storageWarning}
           </p>
         )}
+        {actionWarning && (
+          <p role="status" className="warning">
+            {actionWarning}
+          </p>
+        )}
         {linkError && (
           <div className="warning" role="alert">
             <p>{linkError}</p>
             <Button variant="outline" onClick={openSaved}>
               Open my saved dinner
             </Button>
+            <Button onClick={() => createLocal("new")}>Start new dinner</Button>
           </div>
         )}
-        {shared && (
-          <section className="shared-banner" aria-label="Shared dinner status">
+        {!linkError && ready && (
+          <section className="shared-banner" aria-label="Dinner status">
             <div>
               <strong>
-                {locallyEdited ? "Your edited local copy" : "Shared snapshot"}
+                {shared
+                  ? "Read-only shared snapshot"
+                  : session
+                    ? "Local copy"
+                    : "Saved dinner"}
               </strong>
               <p>
-                Changes stay on this device. Share a new link to send updates.
+                {shared
+                  ? "This link always shows its original snapshot. Edit a copy to make changes."
+                  : session
+                    ? "This copy is local to this tab. Use Share changes to create a link that others can open or that you can keep for later."
+                    : "Your ordinary dinner is saved in this browser."}
               </p>
             </div>
             <div className="shared-actions">
+              {shared && (
+                <Button size="sm" onClick={() => createLocal("copy")}>
+                  Edit a copy
+                </Button>
+              )}
+              {shared && legacy && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => createLocal("recover")}
+                >
+                  Recover previous edits as a local copy
+                </Button>
+              )}
+              {session?.source && (
+                <Button variant="outline" size="sm" onClick={viewOriginal}>
+                  View original snapshot
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() =>
-                  locallyEdited
-                    ? setConfirm("original")
-                    : setNotice("Already showing the original snapshot.")
-                }
+                onClick={() => createLocal("new")}
               >
-                Reload original snapshot
+                Start new dinner
               </Button>
-              <Button variant="ghost" size="sm" onClick={openSaved}>
-                Open my saved dinner
-              </Button>
+              {(shared || session) && (
+                <Button variant="ghost" size="sm" onClick={openSaved}>
+                  Open my saved dinner
+                </Button>
+              )}
             </div>
-            <details>
-              <summary>About saved shared dinners</summary>
-              <p>
-                Your ordinary saved dinner is kept separately. This browser
-                remembers only the most recently edited shared dinner.
-                Refreshing its link restores your edits; after editing another
-                shared dinner, an older link opens its original snapshot. Anyone
-                can change a snapshot; it does not verify who created it.
-              </p>
-            </details>
+            {session && (
+              <details>
+                <summary>About local copies</summary>
+                <p>
+                  One working copy is kept per tab when session storage is
+                  available. Refresh can restore it while that page session
+                  remains available. Browsers may restore sessions or copy their
+                  initial state into a duplicated tab; those copies then edit
+                  independently. A local copy address does not transfer dinner
+                  data. Use Share changes to keep a portable snapshot.
+                </p>
+              </details>
+            )}
           </section>
         )}
-        <div className="workspace">
-          <div className="editor">
-            <section className="card bill-card" aria-labelledby="bill-heading">
-              <div className="section-heading">
-                <div className="heading-group">
-                  <span className="icon-box teal">
-                    <Utensils size={19} />
-                  </span>
-                  <div>
-                    <h2 id="bill-heading">The dinner bill</h2>
-                    <p>One total. We’ll take it from here.</p>
-                  </div>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => requestAction("reset")}
-                >
-                  <RotateCcw size={14} /> Reset
-                </Button>
-              </div>
-              <label htmlFor="dinner-title" className="field-label">
-                Dinner title
-              </label>
-              <Input
-                id="dinner-title"
-                className="dinner-title-input"
-                value={bill.title}
-                placeholder={DEFAULT_TITLE}
-                onChange={(e) => {
-                  if (safeInput(e.target.value, 120))
-                    setBill({ ...bill, title: e.target.value });
-                }}
-                aria-describedby="title-help"
-              />
-              <p id="title-help" className="helper title-helper">
-                Shown in your split, message, and shared dinner. Up to 120
-                characters.
-              </p>
-              <label htmlFor="bill-amount" className="field-label">
-                Total bill amount
-              </label>
-              <div
-                className={`currency-input ${cents === null ? "invalid" : ""}`}
+        {!linkError && (
+          <div className="workspace">
+            <fieldset
+              className="editor editor-fields"
+              disabled={!ready || readOnly}
+            >
+              <section
+                className="card bill-card"
+                aria-labelledby="bill-heading"
               >
-                <span>$</span>
-                <Input
-                  id="bill-amount"
-                  inputMode="decimal"
-                  value={bill.amount}
-                  onChange={(e) => {
-                    if (safeInput(e.target.value, 128))
-                      setBill({ ...bill, amount: e.target.value });
-                  }}
-                  onBlur={() => {
-                    if (cents !== null)
-                      setBill((b) => ({
-                        ...b,
-                        amount: (cents / 100).toFixed(2),
-                      }));
-                  }}
-                  aria-invalid={cents === null}
-                  aria-describedby="bill-help"
-                />
-                <span className="currency-code">USD</span>
-              </div>
-              <p id="bill-help" className="helper">
-                Include any tax and tip in this total.
-              </p>
-              <div className="bill-stats">
-                <span>
-                  <House size={16} />
-                  <b>{bill.households.length}</b> households
-                </span>
-                <span>
-                  <Users size={16} />
-                  <b>{people}</b> people
-                </span>
-                <span className="autosaved">
-                  <Check size={13} />
-                  {!ready
-                    ? "Loading…"
-                    : storageWarning || blocked || linkError
-                      ? "Not saved"
-                      : shared && !locallyEdited
-                        ? "Snapshot loaded"
-                        : "Saved on this device"}
-                </span>
-              </div>
-            </section>
-            <div className="household-heading">
-              <div>
-                <h2>
-                  Your table{" "}
-                  <span className="count-badge">{bill.households.length}</span>
-                </h2>
-                <p>Who’s joining for dinner?</p>
-              </div>
-              <a
-                href="#your-split"
-                className="mobile-summary"
-                onClick={(e) => {
-                  e.preventDefault();
-                  document
-                    .getElementById("your-split")
-                    ?.scrollIntoView({ behavior: "smooth" });
-                }}
-              >
-                View split <ArrowDown size={14} />
-              </a>
-            </div>
-            {bill.households.length === 0 && (
-              <section className="empty-state">
-                <span className="empty-icon">
-                  <House size={29} />
-                  <span>♡</span>
-                </span>
-                <h3>A good meal starts with good company.</h3>
-                <p>Add your first household, then invite the little eaters.</p>
-                <Button onClick={addHouse} disabled={!ready}>
-                  <Plus size={17} /> Add Household
-                </Button>
-                <span className="empty-hint">
-                  Just adults? That works, too.
-                </span>
-              </section>
-            )}
-            {bill.households.map((h, i) => {
-              const row = rows[i];
-              return (
-                <section
-                  className={`card household-card ${colors[i % 4]}`}
-                  key={h.id}
-                  aria-label={householdName(h, i)}
-                >
-                  <div className="household-top">
-                    <span className={`family-avatar ${colors[i % 4]}`}>
-                      <House size={20} />
+                <div className="section-heading">
+                  <div className="heading-group">
+                    <span className="icon-box teal">
+                      <Utensils size={19} />
                     </span>
-                    <Input
-                      aria-label={`Household ${i + 1} name`}
-                      placeholder={`Household ${i + 1}`}
-                      value={h.name}
-                      dir="auto"
-                      onChange={(e) =>
-                        safeInput(e.target.value) &&
-                        patchHouse(h.id, { name: e.target.value })
-                      }
-                    />
+                    <div>
+                      <h2 id="bill-heading">The dinner bill</h2>
+                      <p>One total. We’ll take it from here.</p>
+                    </div>
+                  </div>
+                  {!readOnly && (
                     <Button
                       variant="ghost"
-                      size="icon"
-                      aria-label={`Remove ${householdName(h, i)}`}
-                      onClick={() =>
+                      size="sm"
+                      onClick={() => requestAction("reset")}
+                    >
+                      <RotateCcw size={14} />{" "}
+                      {session ? "Reset changes" : "Reset saved dinner"}
+                    </Button>
+                  )}
+                </div>
+                <label htmlFor="dinner-title" className="field-label">
+                  Dinner title
+                </label>
+                <Input
+                  readOnly={readOnly}
+                  id="dinner-title"
+                  className="dinner-title-input"
+                  value={bill.title}
+                  placeholder={DEFAULT_TITLE}
+                  onChange={(e) => {
+                    if (safeInput(e.target.value, 120))
+                      setBill({ ...bill, title: e.target.value });
+                  }}
+                  aria-describedby="title-help"
+                />
+                <p id="title-help" className="helper title-helper">
+                  Shown in your split, message, and shared dinner. Up to 120
+                  characters.
+                </p>
+                <label htmlFor="bill-amount" className="field-label">
+                  Total bill amount
+                </label>
+                <div
+                  className={`currency-input ${cents === null ? "invalid" : ""}`}
+                >
+                  <span>$</span>
+                  <Input
+                    readOnly={readOnly}
+                    id="bill-amount"
+                    inputMode="decimal"
+                    value={bill.amount}
+                    onChange={(e) => {
+                      if (safeInput(e.target.value, 128))
+                        setBill({ ...bill, amount: e.target.value });
+                    }}
+                    onBlur={() => {
+                      if (cents !== null)
                         setBill((b) => ({
                           ...b,
-                          households: b.households.filter((x) => x.id !== h.id),
-                        }))
-                      }
-                    >
-                      <Trash2 size={16} />
-                    </Button>
-                  </div>
-                  <div className="adults-row">
-                    <div>
-                      <label htmlFor={`adults-${h.id}`}>
-                        <Users size={16} /> Adults
-                      </label>
-                      <p>100% portion per adult</p>
-                    </div>
-                    <div className="stepper">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label={`Fewer adults in ${householdName(h, i)}`}
-                        disabled={h.adults === 0}
-                        onClick={() =>
-                          patchHouse(h.id, { adults: h.adults - 1 })
-                        }
-                      >
-                        −
-                      </Button>
+                          amount: (cents / 100).toFixed(2),
+                        }));
+                    }}
+                    aria-invalid={cents === null}
+                    aria-describedby="bill-help"
+                  />
+                  <span className="currency-code">USD</span>
+                </div>
+                <p id="bill-help" className="helper">
+                  Include any tax and tip in this total.
+                </p>
+                <div className="bill-stats">
+                  <span>
+                    <House size={16} />
+                    <b>{bill.households.length}</b> households
+                  </span>
+                  <span>
+                    <Users size={16} />
+                    <b>{people}</b> people
+                  </span>
+                  <span className="autosaved">
+                    <Check size={13} />
+                    {!ready
+                      ? "Loading…"
+                      : shared
+                        ? "Read-only snapshot"
+                        : storageWarning || blocked || linkError
+                          ? "Not saved"
+                          : session
+                            ? "Saved in this tab"
+                            : "Saved on this device"}
+                  </span>
+                </div>
+              </section>
+              <div className="household-heading">
+                <div>
+                  <h2>
+                    Your table{" "}
+                    <span className="count-badge">
+                      {bill.households.length}
+                    </span>
+                  </h2>
+                  <p>Who’s joining for dinner?</p>
+                </div>
+                <a
+                  href="#your-split"
+                  className="mobile-summary"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    document
+                      .getElementById("your-split")
+                      ?.scrollIntoView({ behavior: "smooth" });
+                  }}
+                >
+                  View split <ArrowDown size={14} />
+                </a>
+              </div>
+              {bill.households.length === 0 && (
+                <section className="empty-state">
+                  <span className="empty-icon">
+                    <House size={29} />
+                    <span>♡</span>
+                  </span>
+                  <h3>A good meal starts with good company.</h3>
+                  <p>
+                    Add your first household, then invite the little eaters.
+                  </p>
+                  <Button onClick={addHouse} disabled={!ready}>
+                    <Plus size={17} /> Add Household
+                  </Button>
+                  <span className="empty-hint">
+                    Just adults? That works, too.
+                  </span>
+                </section>
+              )}
+              {bill.households.map((h, i) => {
+                const row = rows[i];
+                return (
+                  <section
+                    className={`card household-card ${colors[i % 4]}`}
+                    key={h.id}
+                    aria-label={householdName(h, i)}
+                  >
+                    <div className="household-top">
+                      <span className={`family-avatar ${colors[i % 4]}`}>
+                        <House size={20} />
+                      </span>
                       <Input
-                        id={`adults-${h.id}`}
-                        aria-label={`Adults in ${householdName(h, i)}`}
-                        type="number"
-                        min="0"
-                        max="1000"
-                        value={h.adults}
+                        readOnly={readOnly}
+                        aria-label={`Household ${i + 1} name`}
+                        placeholder={`Household ${i + 1}`}
+                        value={h.name}
+                        dir="auto"
                         onChange={(e) =>
-                          patchHouse(h.id, {
-                            adults: Math.min(
-                              1000,
-                              Math.max(
-                                0,
-                                Math.floor(Number(e.target.value) || 0),
-                              ),
-                            ),
-                          })
+                          safeInput(e.target.value) &&
+                          patchHouse(h.id, { name: e.target.value })
                         }
                       />
                       <Button
                         variant="ghost"
                         size="icon"
-                        disabled={h.adults === 1000}
-                        aria-label={`More adults in ${householdName(h, i)}`}
+                        aria-label={`Remove ${householdName(h, i)}`}
                         onClick={() =>
-                          patchHouse(h.id, { adults: h.adults + 1 })
+                          setBill((b) => ({
+                            ...b,
+                            households: b.households.filter(
+                              (x) => x.id !== h.id,
+                            ),
+                          }))
                         }
                       >
-                        +
+                        <Trash2 size={16} />
                       </Button>
                     </div>
-                  </div>
-                  {h.children.map((c, j) => (
-                    <div className="child-card" key={c.id}>
-                      <div className="child-fields">
-                        <span className="child-emoji" aria-hidden="true">
-                          🧒
-                        </span>
-                        <label className="child-name">
-                          <span className="sr-only">
-                            Child {j + 1} name in {householdName(h, i)}
-                          </span>
-                          <Input
-                            placeholder={`Child ${j + 1}`}
-                            value={c.name}
-                            dir="auto"
-                            onChange={(e) =>
-                              safeInput(e.target.value) &&
-                              patchChild(h.id, c.id, { name: e.target.value })
-                            }
-                          />
+                    <div className="adults-row">
+                      <div>
+                        <label htmlFor={`adults-${h.id}`}>
+                          <Users size={16} /> Adults
                         </label>
-                        <label className="age-field">
-                          <span>Age</span>
-                          <Input
-                            type="number"
-                            min="0"
-                            max="17"
-                            placeholder="—"
-                            value={c.age ?? ""}
-                            aria-label={`Age of ${childName(c, j)}`}
-                            onChange={(e) => {
-                              const value = e.target.value;
-                              const age =
-                                value === ""
-                                  ? null
-                                  : Math.min(
-                                      17,
-                                      Math.max(
-                                        0,
-                                        Math.floor(Number(value) || 0),
-                                      ),
-                                    );
-                              patchChild(h.id, c.id, { age });
-                            }}
-                          />
-                        </label>
+                        <p>100% portion per adult</p>
+                      </div>
+                      <div className="stepper">
                         <Button
                           variant="ghost"
                           size="icon"
-                          aria-label={`Remove ${childName(c, j)}`}
+                          aria-label={`Fewer adults in ${householdName(h, i)}`}
+                          disabled={h.adults === 0}
                           onClick={() =>
-                            patchHouse(h.id, {
-                              children: h.children.filter((x) => x.id !== c.id),
-                            })
+                            patchHouse(h.id, { adults: h.adults - 1 })
                           }
                         >
-                          <Trash2 size={14} />
+                          −
+                        </Button>
+                        <Input
+                          readOnly={readOnly}
+                          id={`adults-${h.id}`}
+                          aria-label={`Adults in ${householdName(h, i)}`}
+                          type="number"
+                          min="0"
+                          max="1000"
+                          value={h.adults}
+                          onChange={(e) =>
+                            patchHouse(h.id, {
+                              adults: Math.min(
+                                1000,
+                                Math.max(
+                                  0,
+                                  Math.floor(Number(e.target.value) || 0),
+                                ),
+                              ),
+                            })
+                          }
+                        />
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          disabled={h.adults === 1000}
+                          aria-label={`More adults in ${householdName(h, i)}`}
+                          onClick={() =>
+                            patchHouse(h.id, { adults: h.adults + 1 })
+                          }
+                        >
+                          +
                         </Button>
                       </div>
-                      <div className="portion-label">
-                        <label htmlFor={`slider-${c.id}`}>
-                          Adult-equivalent portion
-                        </label>
-                        <span>{c.percentage}%</span>
-                      </div>
-                      <input
-                        className="portion-slider"
-                        id={`slider-${c.id}`}
-                        aria-label={`Portion for ${childName(c, j)}`}
-                        type="range"
-                        min="0"
-                        max="100"
-                        step="5"
-                        value={c.percentage}
-                        style={
-                          {
-                            "--progress": `${c.percentage}%`,
-                          } as React.CSSProperties
-                        }
-                        onChange={(e) =>
-                          patchChild(h.id, c.id, {
-                            percentage: Number(e.target.value),
-                          })
-                        }
-                      />
-                      <div className="slider-scale">
-                        <span>0% · little bites</span>
-                        <span>100% · adult portion</span>
-                      </div>
-                      <div className="age-default">
-                        <span>
-                          {c.age === null
-                            ? "Enter an age for a starting suggestion"
-                            : `Age suggestion: ${ageDefault(c.age)}%`}
-                          {c.overridden ? " · Customized" : ""}
-                        </span>
-                        <button
-                          onClick={() => patchChild(h.id, c.id, {}, true)}
-                          className="text-button"
-                        >
-                          Reset to age default
-                        </button>
-                      </div>
                     </div>
-                  ))}
-                  <Button
-                    className="add-child"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => addChild(h.id)}
-                  >
-                    <Plus size={15} /> Add Child
-                  </Button>
-                  <div className="household-footer">
-                    <span>
-                      Combined portion <b>{householdWeight(h)}%</b>
-                    </span>
-                    <span>
-                      Household share{" "}
-                      <strong>{error ? "—" : money(row?.cents ?? 0)}</strong>
-                    </span>
-                  </div>
-                </section>
-              );
-            })}
-            {bill.households.length > 0 && (
-              <Button
-                variant="outline"
-                className="add-household"
-                onClick={addHouse}
-              >
-                <Plus size={18} /> Add Household
-              </Button>
-            )}
-            <div className="portion-note">
-              <Info size={18} />
-              <p>
-                <b>Every appetite is different.</b> Age suggestions are just a
-                starting point. Adjust each slider to reflect what your little
-                eater actually ate.
-              </p>
-            </div>
-          </div>
-          <aside className="results-column">
-            <section
-              id="your-split"
-              className="card summary-card"
-              aria-labelledby="split-heading"
-            >
-              <div className="section-heading">
-                <div className="heading-group">
-                  <span className="icon-box light-teal">
-                    <span aria-hidden="true">$</span>
-                  </span>
-                  <div>
-                    <h2 id="split-heading" dir="auto">
-                      {billTitle(bill)}
-                    </h2>
-                    <p>A fair share for every household.</p>
-                  </div>
-                </div>
-                <span className="live-badge">
-                  <span /> LIVE
-                </span>
-              </div>
-              {error && (
-                <p role="alert" className="warning">
-                  {error}
-                </p>
-              )}
-              {bill.households.length === 0 ? (
-                <div className="summary-empty">
-                  <div className="empty-bars">
-                    <span />
-                    <span />
-                    <span />
-                  </div>
-                  <p>Your table’s split will appear here.</p>
-                  <span>Add a household to get started.</span>
-                </div>
-              ) : (
-                <>
-                  <div className="table-heading">
-                    <span>HOUSEHOLD / PORTION</span>
-                    <span>AMOUNT</span>
-                  </div>
-                  <div className="summary-rows">
-                    {bill.households.map((h, i) => (
-                      <div className="summary-row" key={h.id}>
-                        <div>
-                          <span className={`color-dot ${colors[i % 4]}`} />
-                          <b dir="auto">{householdName(h, i)}</b>
-                          <span className="weight-label">
-                            {householdWeight(h)}%
+                    {h.children.map((c, j) => (
+                      <div className="child-card" key={c.id}>
+                        <div className="child-fields">
+                          <span className="child-emoji" aria-hidden="true">
+                            🧒
                           </span>
-                          <strong data-testid={`payment-${i}`}>
-                            {error ? "—" : money(rows[i]?.cents ?? 0)}
-                          </strong>
+                          <label className="child-name">
+                            <span className="sr-only">
+                              Child {j + 1} name in {householdName(h, i)}
+                            </span>
+                            <Input
+                              readOnly={readOnly}
+                              placeholder={`Child ${j + 1}`}
+                              value={c.name}
+                              dir="auto"
+                              onChange={(e) =>
+                                safeInput(e.target.value) &&
+                                patchChild(h.id, c.id, { name: e.target.value })
+                              }
+                            />
+                          </label>
+                          <label className="age-field">
+                            <span>Age</span>
+                            <Input
+                              readOnly={readOnly}
+                              type="number"
+                              min="0"
+                              max="17"
+                              placeholder="—"
+                              value={c.age ?? ""}
+                              aria-label={`Age of ${childName(c, j)}`}
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                const age =
+                                  value === ""
+                                    ? null
+                                    : Math.min(
+                                        17,
+                                        Math.max(
+                                          0,
+                                          Math.floor(Number(value) || 0),
+                                        ),
+                                      );
+                                patchChild(h.id, c.id, { age });
+                              }}
+                            />
+                          </label>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`Remove ${childName(c, j)}`}
+                            onClick={() =>
+                              patchHouse(h.id, {
+                                children: h.children.filter(
+                                  (x) => x.id !== c.id,
+                                ),
+                              })
+                            }
+                          >
+                            <Trash2 size={14} />
+                          </Button>
                         </div>
-                        <div className="proportion-track">
-                          <div
-                            className={colors[i % 4]}
-                            style={{
-                              width: `${totalWeight ? (householdWeight(h) / totalWeight) * 100 : 0}%`,
-                            }}
-                          />
+                        <div className="portion-label">
+                          <label htmlFor={`slider-${c.id}`}>
+                            Adult-equivalent portion
+                          </label>
+                          <span>{c.percentage}%</span>
+                        </div>
+                        <input
+                          className="portion-slider"
+                          id={`slider-${c.id}`}
+                          aria-label={`Portion for ${childName(c, j)}`}
+                          type="range"
+                          min="0"
+                          max="100"
+                          step="5"
+                          value={c.percentage}
+                          style={
+                            {
+                              "--progress": `${c.percentage}%`,
+                            } as React.CSSProperties
+                          }
+                          onChange={(e) =>
+                            patchChild(h.id, c.id, {
+                              percentage: Number(e.target.value),
+                            })
+                          }
+                        />
+                        <div className="slider-scale">
+                          <span>0% · little bites</span>
+                          <span>100% · adult portion</span>
+                        </div>
+                        <div className="age-default">
+                          <span>
+                            {c.age === null
+                              ? "Enter an age for a starting suggestion"
+                              : `Age suggestion: ${ageDefault(c.age)}%`}
+                            {c.overridden ? " · Customized" : ""}
+                          </span>
+                          <button
+                            onClick={() => patchChild(h.id, c.id, {}, true)}
+                            className="text-button"
+                          >
+                            Reset to age default
+                          </button>
                         </div>
                       </div>
                     ))}
-                  </div>
-                </>
-              )}
-              <div className="grand-total">
-                <div>
-                  <span>Total dinner bill</span>
-                  <p>{totalWeight}% combined portions</p>
-                </div>
-                <strong>{cents === null ? "—" : money(cents)}</strong>
-              </div>
-              <div className="share-summary-action">
-                <Button
-                  className="share-dinner-button"
-                  onClick={openShare}
-                  disabled={
-                    !ready || !!linkError || !!error || !bill.households.length
-                  }
-                >
-                  <Share2 size={17} /> Share dinner
-                </Button>
-                <p>Send a snapshot others can edit in their own browser.</p>
-              </div>
-              <div className="rounding-note">
-                <ShieldCheck size={14} />
-                {bill.households.length && !error
-                  ? "Every penny accounted for. Always."
-                  : "Fair portions. Exact pennies. Zero awkwardness."}
-              </div>
+                    <Button
+                      className="add-child"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => addChild(h.id)}
+                    >
+                      <Plus size={15} /> Add Child
+                    </Button>
+                    <div className="household-footer">
+                      <span>
+                        Combined portion <b>{householdWeight(h)}%</b>
+                      </span>
+                      <span>
+                        Household share{" "}
+                        <strong>{error ? "—" : money(row?.cents ?? 0)}</strong>
+                      </span>
+                    </div>
+                  </section>
+                );
+              })}
               {bill.households.length > 0 && (
-                <details className="calculation-details">
-                  <summary>
-                    How is this calculated? <ChevronDown size={14} />
-                  </summary>
-                  <p>
-                    Adults count as 100%. Add the children’s chosen percentages
-                    to get each household’s combined portion. Divide that by the
-                    group’s {totalWeight}% to find its share.
-                  </p>
-                  <p>
-                    We allocate whole cents, then give remaining pennies to the
-                    largest fractional remainders. Ties follow household order.
-                  </p>
-                  {bill.households.map((h, i) => (
-                    <p key={h.id}>
-                      {householdName(h, i)}: {householdWeight(h)} ÷{" "}
-                      {totalWeight || "—"} ×{" "}
-                      {cents === null ? "—" : money(cents)} →{" "}
-                      {error ? "—" : money(rows[i]?.cents ?? 0)}
-                    </p>
-                  ))}
-                </details>
+                <Button
+                  variant="outline"
+                  className="add-household"
+                  onClick={addHouse}
+                >
+                  <Plus size={18} /> Add Household
+                </Button>
               )}
-            </section>
-            <section
-              className="card message-card"
-              aria-labelledby="message-heading"
-            >
-              <div className="section-heading">
-                <div className="heading-group">
-                  <span className="icon-box coral">
-                    <MessageCircle size={19} />
+              <div className="portion-note">
+                <Info size={18} />
+                <p>
+                  <b>Every appetite is different.</b> Age suggestions are just a
+                  starting point. Adjust each slider to reflect what your little
+                  eater actually ate.
+                </p>
+              </div>
+            </fieldset>
+            <aside className="results-column">
+              <section
+                id="your-split"
+                className="card summary-card"
+                aria-labelledby="split-heading"
+              >
+                <div className="section-heading">
+                  <div className="heading-group">
+                    <span className="icon-box light-teal">
+                      <span aria-hidden="true">$</span>
+                    </span>
+                    <div>
+                      <h2 id="split-heading" dir="auto">
+                        {billTitle(bill)}
+                      </h2>
+                      <p>A fair share for every household.</p>
+                    </div>
+                  </div>
+                  <span className="live-badge">
+                    <span /> LIVE
                   </span>
+                </div>
+                {error && (
+                  <p role="alert" className="warning">
+                    {error}
+                  </p>
+                )}
+                {bill.households.length === 0 ? (
+                  <div className="summary-empty">
+                    <div className="empty-bars">
+                      <span />
+                      <span />
+                      <span />
+                    </div>
+                    <p>Your table’s split will appear here.</p>
+                    <span>Add a household to get started.</span>
+                  </div>
+                ) : (
+                  <>
+                    <div className="table-heading">
+                      <span>HOUSEHOLD / PORTION</span>
+                      <span>AMOUNT</span>
+                    </div>
+                    <div className="summary-rows">
+                      {bill.households.map((h, i) => (
+                        <div className="summary-row" key={h.id}>
+                          <div>
+                            <span className={`color-dot ${colors[i % 4]}`} />
+                            <b dir="auto">{householdName(h, i)}</b>
+                            <span className="weight-label">
+                              {householdWeight(h)}%
+                            </span>
+                            <strong data-testid={`payment-${i}`}>
+                              {error ? "—" : money(rows[i]?.cents ?? 0)}
+                            </strong>
+                          </div>
+                          <div className="proportion-track">
+                            <div
+                              className={colors[i % 4]}
+                              style={{
+                                width: `${totalWeight ? (householdWeight(h) / totalWeight) * 100 : 0}%`,
+                              }}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+                <div className="grand-total">
                   <div>
-                    <h2 id="message-heading">Made for the group chat</h2>
-                    <p>A little clarity. A lot of good vibes.</p>
+                    <span>Total dinner bill</span>
+                    <p>{totalWeight}% combined portions</p>
+                  </div>
+                  <strong>{cents === null ? "—" : money(cents)}</strong>
+                </div>
+                <div className="share-summary-action">
+                  <Button
+                    className="share-dinner-button"
+                    onClick={openShare}
+                    disabled={
+                      !ready ||
+                      !!linkError ||
+                      !!error ||
+                      !bill.households.length
+                    }
+                  >
+                    <Share2 size={17} />{" "}
+                    {session ? "Share changes" : "Share dinner"}
+                  </Button>
+                  <p>
+                    Send a fixed snapshot. Recipients can edit a separate local
+                    copy.
+                  </p>
+                </div>
+                <div className="rounding-note">
+                  <ShieldCheck size={14} />
+                  {bill.households.length && !error
+                    ? "Every penny accounted for. Always."
+                    : "Fair portions. Exact pennies. Zero awkwardness."}
+                </div>
+                {bill.households.length > 0 && (
+                  <details className="calculation-details">
+                    <summary>
+                      How is this calculated? <ChevronDown size={14} />
+                    </summary>
+                    <p>
+                      Adults count as 100%. Add the children’s chosen
+                      percentages to get each household’s combined portion.
+                      Divide that by the group’s {totalWeight}% to find its
+                      share.
+                    </p>
+                    <p>
+                      We allocate whole cents, then give remaining pennies to
+                      the largest fractional remainders. Ties follow household
+                      order.
+                    </p>
+                    {bill.households.map((h, i) => (
+                      <p key={h.id}>
+                        {householdName(h, i)}: {householdWeight(h)} ÷{" "}
+                        {totalWeight || "—"} ×{" "}
+                        {cents === null ? "—" : money(cents)} →{" "}
+                        {error ? "—" : money(rows[i]?.cents ?? 0)}
+                      </p>
+                    ))}
+                  </details>
+                )}
+              </section>
+              <section
+                className="card message-card"
+                aria-labelledby="message-heading"
+              >
+                <div className="section-heading">
+                  <div className="heading-group">
+                    <span className="icon-box coral">
+                      <MessageCircle size={19} />
+                    </span>
+                    <div>
+                      <h2 id="message-heading">Made for the group chat</h2>
+                      <p>A little clarity. A lot of good vibes.</p>
+                    </div>
                   </div>
                 </div>
-              </div>
-              <div className="tone-row">
-                <span>Message tone</span>
-                <div
-                  className="tone-switch"
-                  role="group"
-                  aria-label="Message tone"
-                >
-                  <button
-                    aria-pressed={bill.tone === "fun"}
-                    onClick={() => setBill({ ...bill, tone: "fun" })}
+                <div className="tone-row">
+                  <span>Message tone</span>
+                  <div
+                    className="tone-switch"
+                    role="group"
+                    aria-label="Message tone"
                   >
-                    🎉 Fun
-                  </button>
-                  <button
-                    aria-pressed={bill.tone === "simple"}
-                    onClick={() => setBill({ ...bill, tone: "simple" })}
-                  >
-                    ✨ Simple
-                  </button>
+                    <button
+                      disabled={readOnly || !ready}
+                      aria-pressed={bill.tone === "fun"}
+                      onClick={() => setBill({ ...bill, tone: "fun" })}
+                    >
+                      🎉 Fun
+                    </button>
+                    <button
+                      disabled={readOnly || !ready}
+                      aria-pressed={bill.tone === "simple"}
+                      onClick={() => setBill({ ...bill, tone: "simple" })}
+                    >
+                      ✨ Simple
+                    </button>
+                  </div>
                 </div>
+                <div
+                  className="message-preview"
+                  tabIndex={0}
+                  aria-label="Message preview"
+                >
+                  <span className="preview-label">YOUR MESSAGE PREVIEW</span>
+                  <p data-testid="message">{message}</p>
+                </div>
+                <Button
+                  className="copy-button"
+                  disabled={
+                    !ready ||
+                    !!error ||
+                    !bill.households.length ||
+                    !messageInputsSafe
+                  }
+                  onClick={copy}
+                >
+                  <Copy size={17} /> 📋 Copy Message
+                </Button>
+                <p className="copy-help">
+                  Ready for WhatsApp, iMessage, or your favorite group chat.
+                </p>
+              </section>
+              <div className="privacy-note">
+                <ShieldCheck size={15} />
+                <span>
+                  Your dinner stays at your table.
+                  <br />
+                  {shared
+                    ? "Read-only link snapshot. No account needed."
+                    : session
+                      ? "Local to this tab. Share a link to keep it."
+                      : "Saved only in this browser. No account needed."}
+                </span>
               </div>
-              <div
-                className="message-preview"
-                tabIndex={0}
-                aria-label="Message preview"
-              >
-                <span className="preview-label">YOUR MESSAGE PREVIEW</span>
-                <p data-testid="message">{message}</p>
-              </div>
-              <Button
-                className="copy-button"
-                disabled={
-                  !ready ||
-                  !!error ||
-                  !bill.households.length ||
-                  !messageInputsSafe
-                }
-                onClick={copy}
-              >
-                <Copy size={17} /> 📋 Copy Message
-              </Button>
-              <p className="copy-help">
-                Ready for WhatsApp, iMessage, or your favorite group chat.
-              </p>
-            </section>
-            <div className="privacy-note">
-              <ShieldCheck size={15} />
-              <span>
-                Your dinner stays at your table.
-                <br />
-                Saved only in this browser. No account needed.
-              </span>
-            </div>
-          </aside>
-        </div>
+            </aside>
+          </div>
+        )}
         <footer>
           <span className="footer-brand">
             <Utensils size={15} /> Family Meal Splitter
@@ -884,17 +970,17 @@ export default function MealSplitter() {
           </span>
           <h2 id="confirm-title">
             {confirm === "reset"
-              ? "Start a fresh dinner?"
-              : confirm === "original"
-                ? "Reload the original snapshot?"
-                : "Load the example dinner?"}
+              ? session
+                ? "Reset changes?"
+                : "Reset saved dinner?"
+              : "Load the example dinner?"}
           </h2>
           <p>
             {confirm === "reset"
-              ? "This will clear the currently open dinner and replace its local draft. Your other saved dinner is kept separately."
-              : confirm === "original"
-                ? "This discards your edits to this shared copy and restores the values in the original link."
-                : "This will replace the currently open dinner with the fictional four-family dinner."}
+              ? session
+                ? "This discards your changes and restores this local copy’s complete starting values. The local copy address stays the same."
+                : "This clears the ordinary dinner saved in this browser. A separate local copy is kept."
+              : "This will replace the currently open dinner with the fictional four-family dinner. A local copy’s starting values stay unchanged."}
           </p>
           <div>
             <Button
@@ -906,7 +992,7 @@ export default function MealSplitter() {
             </Button>
             <Button
               onClick={() => {
-                if (confirm === "original") reloadOriginal();
+                if (confirm === "reset" && session) resetChanges();
                 else
                   replaceBill(
                     confirm === "reset" ? cleanBill() : exampleBill(),
@@ -915,10 +1001,10 @@ export default function MealSplitter() {
               }}
             >
               {confirm === "reset"
-                ? "Reset dinner"
-                : confirm === "original"
-                  ? "Reload original"
-                  : "Load example"}
+                ? session
+                  ? "Reset changes"
+                  : "Reset saved dinner"
+                : "Load example"}
             </Button>
           </div>
         </Dialog>

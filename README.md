@@ -13,23 +13,35 @@ npm run dev
 
 Open http://localhost:3000. Start with a clean bill or choose **Load Example Dinner**. Enter the complete total including tax and tip, add households and adults, then add optional children. Each child's slider is independent. Age defaults are suggestions; customized percentages survive age changes until **Reset to age default** is selected. Results and the copy-ready message update immediately. A zero-adult household is supported.
 
-The bill and tone persist only in this browser's localStorage. Private browsing, browser storage policies, or clearing site data may prevent persistence. Names and bill data are never sent to an analytics service. Clipboard copying requires HTTPS or localhost and browser permission; the preview can also be selected and copied manually. Reset and example replacement ask for confirmation when existing data would be replaced.
+The ordinary saved dinner persists in this browser’s localStorage. Local working copies use a separate sessionStorage record for this tab. Private browsing, browser storage policies, or clearing site data may prevent persistence. Names and bill data are never sent to an analytics service. Clipboard copying requires HTTPS or localhost and browser permission; the preview can also be selected and copied manually. Reset and example replacement ask for confirmation when existing data would be replaced.
 
 ## Share a configured dinner
 
 Give your bill a **Dinner title**, configure the households and portions, then choose **Share dinner**. The privacy dialog defaults to children's initials; **Keep names as entered** is optional. Both modes retain ages. Household names and the dinner title remain unchanged. The choice changes only the outgoing snapshot, never your names in the editor.
 
-The copied link contains a fixed, editable snapshot in its URL fragment. There is no shared server record: old links never update, and a recipient can edit locally and share a new link back. Names omitted by an initials-only link cannot be recovered. Ages remain excluded from the generated group text.
+The copied link contains a fixed, read-only snapshot in its URL fragment. There is no shared server record: old links always show their encoded original. A recipient selects **Edit a copy** to create an editable local session and uses **Share changes** to send a revised snapshot back. Names omitted by an initials-only link cannot be recovered. Ages remain excluded from the generated group text.
 
-This browser retains your ordinary dinner and the most recently edited shared dinner separately. Refreshing the matching link resumes your local edits. After you edit another shared dinner, opening an older link restores its original snapshot. **Reload original snapshot** confirms before discarding edits; **Open my saved dinner** returns to your ordinary draft. Legacy saved dinners receive the default title without losing their other values. Invalid saved data is left untouched until you deliberately reset or recover it.
+Three addresses keep these modes separate:
+
+- The base app URL opens your ordinary saved dinner. **Reset saved dinner** clears only that dinner after confirmation.
+- A `#share=v1.…` link always opens its original snapshot read-only. Titles, totals, names, ages, portions, adults, and message tone cannot change under that address.
+- **Edit a copy** opens `?draft=<UUID>` in the same tab without a shared fragment. This opaque identifier only selects the matching local record in this tab; it is not a public dinner ID, authentication credential, or server lookup. Copying this address does not transfer the dinner.
+
+One active local working copy is stored per tab, with separate starting values and current edits. Refresh restores the matching copy while its page-session storage remains available. **Reset changes** restores all starting values after confirmation and keeps the same address. **Load Example Dinner** changes current values only. **Start new dinner** creates a different blank local copy and never clears your ordinary saved dinner; replacing an edited active copy asks for confirmation even when you are viewing a snapshot or your saved dinner.
+
+**View original snapshot**, browser Back/Forward, and **Open my saved dinner** preserve a stored working copy. **Share changes** always opens the privacy dialog with initials selected, exports current values to a portable fragment link without a draft query, and leaves your working address and original snapshot unchanged. Identical serialized snapshots can produce identical links.
+
+Session storage is not a durable saved-dinner library. Browsers may restore page sessions after closing or copy their initial state into duplicated/opener-created tabs; subsequent tab edits are independent. Missing, corrupt, mismatched, or unavailable local records show an unavailable-copy message with recovery actions and never reveal another copy. Storage failures preserve existing stored bytes, warn about unsaved edits, and permit in-memory editing; leaving may lose those edits. Browser-close warnings are best effort.
+
+Older shared-link overrides never replace the original. If a validated legacy record matches the original snapshot’s digest, **Recover previous edits as a local copy** explicitly creates a new session with those edits and the original reset baseline. Legacy bytes remain untouched. Ordinary saved dinners without a title still migrate to the default without losing other values.
 
 Anyone with a link can read or change its contents. Encoding is not encryption or proof of identity. Links can remain in browser history and messages and cannot be individually revoked. Local storage is unencrypted; all projects under the same `derrick-tao.github.io` origin share access to it. Initials do not guarantee anonymity.
 
 ## Sharing security
 
-See [the approved requirements](docs/sharing-requirements.md). Version 1 has one `#share=v1.<unpadded-base64url>` payload containing uncompressed UTF-8 JSON. It accepts only the documented version, object fields, numeric ranges, and name/ID types. It rejects noncanonical encoding, invalid UTF-8, unknown/prototype-related keys, unexpected nesting, controls and explicit bidi controls, and malformed data without overwriting drafts. Normal multilingual letters, emoji, combining marks, apostrophes, and hyphens remain supported. Names and titles render as React text and never become HTML, CSS, scripts, or navigation destinations. Shared identifiers are regenerated without names.
+See [the snapshot/session requirements](docs/snapshot-session-requirements.md) and [the sharing/security baseline](docs/sharing-requirements.md). Version 1 has one `#share=v1.<unpadded-base64url>` payload containing uncompressed UTF-8 JSON. It accepts only the documented version, object fields, numeric ranges, and name/ID types. It rejects noncanonical encoding, invalid UTF-8, unknown/prototype-related keys, unexpected nesting, controls and explicit bidi controls, and malformed data without overwriting drafts. Normal multilingual letters, emoji, combining marks, apostrophes, and hyphens remain supported. Names and titles render as React text and never become HTML, CSS, scripts, or navigation destinations. Shared identifiers are regenerated without names.
 
-Sharing limits are 8,000 URL characters, 256 KiB decoded bytes (the URL limit yields a much smaller effective v1 payload), 200 households plus children, depth eight, and 120 Unicode characters per name/title. Each local draft slot has a 1 MiB serialized limit; incomplete amount input may still be restored and edited. Oversized/invalid links and failed storage writes preserve existing data. No dinner details are logged, analyzed, shortened externally, or sent to an application backend.
+Sharing limits are 8,000 URL characters, 256 KiB decoded bytes (the URL limit yields a much smaller effective v1 payload), 200 households plus children, depth eight, and 120 Unicode characters per name/title. Each local record has a 1 MiB serialized limit, including both baseline and current values in a working copy; incomplete amount input may still be restored and edited. Oversized/invalid links and failed storage writes preserve existing data. No dinner details are logged, analyzed, shortened externally, or sent to an application backend.
 
 The static Pages build adds an early Content Security Policy to every exported HTML page. Inline Next.js hydration scripts use exact build-generated SHA-256 hashes; scripts cannot use `unsafe-inline` or `unsafe-eval`. Numeric progress styling has a separate inline-style allowance. Meta CSP cannot set HSTS or `frame-ancestors`; no such host-level protection is claimed. Context-safe rendering and schema validation remain the primary input defenses.
 
@@ -64,7 +76,8 @@ The external-server mode tests the actual static export and its generated CSP. T
 
 - `lib/meal.ts`: types, age defaults, state validation, pure child update helpers, USD input parsing, exact cent allocation, example fixture, and message generation.
 - `lib/sharing.ts` and `lib/validation.ts`: strict share codec, privacy transformation, schema reconstruction, and draft validation.
-- `hooks/use-dinner.ts`: separate ordinary/shared local drafts and safe navigation/recovery.
+- `lib/sessions.ts`: strict local pointer grammar, versioned session records, baseline/source validation, and trusted address construction.
+- `hooks/use-dinner.ts`: separate read-only snapshots, ordinary saved dinners, per-tab working copies, and guarded navigation/recovery.
 - `scripts/static-csp.mjs`: build-time CSP hashing and insertion for static Pages.
 - `components/meal-splitter.tsx`: responsive editor, dashboard, localStorage, confirmations, and clipboard flow.
 - `components/ui/`: local, editable shadcn-style button and input primitives.

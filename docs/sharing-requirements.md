@@ -2,6 +2,8 @@
 
 Source: https://chatgpt.com/space/page_47587cc80f308191a8f2cd14e2ac6717
 
+**Current behavior:** [Snapshot reset and local session requirements](snapshot-session-requirements.md) supersedes the original recipient-editing, same-link override, shared-draft retention, and reset/navigation rules below. Shared links are read-only originals; editing requires a separate per-tab `?draft=<UUID>` session. The title, privacy, financial, security, and resource requirements here remain the baseline. Historical clauses below are retained as approval history, not current behavior.
+
 This specification adds configurable dinner titles and shareable dinner snapshots to [Family Meal Splitter](https://derrick-tao.github.io/family-meal-splitter-web/). It incorporates the agreed choices: immutable snapshots, immediate recipient editing, a privacy choice for children’s names, and ages retained in both sharing modes.
 
 **Status: approved for implementation.** The user approved these requirements, including the security additions, and requested delegated implementation, separate code review, and fresh browser verification with screenshot evidence before commit and push.
