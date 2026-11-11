@@ -53,7 +53,7 @@ test("build a dinner, adjust independent portions, copy, and restore", async ({
     ),
   ).toBe(true);
 });
-test("example dinner and slider update; reset can be cancelled", async ({
+test("example dinner and slider update; New bill can be cancelled", async ({
   page,
 }) => {
   await page.goto("./");
@@ -65,21 +65,17 @@ test("example dinner and slider update; reset can be cancelled", async ({
   for (let i = 0; i < 4; i++) await slider.press("ArrowRight");
   await expect(page.getByTestId("payment-0")).toHaveText("$68.58");
   await expect(page.getByTestId("message")).toContainText("Child A2: 50%");
-  await page
-    .getByRole("button", { name: "Reset saved dinner", exact: true })
-    .click();
-  await page.getByRole("button", { name: "Keep my dinner" }).click();
+  await page.getByRole("button", { name: "New bill", exact: true }).click();
+  await page.getByRole("button", { name: "Keep my bill" }).click();
   await expect(slider).toHaveValue("50");
   await page.screenshot({
     path: `test-results/dinner-${test.info().project.name}.png`,
     fullPage: true,
   });
-  await page
-    .getByRole("button", { name: "Reset saved dinner", exact: true })
-    .click();
+  await page.getByRole("button", { name: "New bill", exact: true }).click();
   await page
     .getByRole("dialog")
-    .getByRole("button", { name: "Reset saved dinner", exact: true })
+    .getByRole("button", { name: "Start new bill", exact: true })
     .click();
   await expect(page.getByLabel("Total bill amount")).toHaveValue("0.00");
   await expect(page.getByTestId("payment-0")).toHaveCount(0);

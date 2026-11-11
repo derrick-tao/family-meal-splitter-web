@@ -12,7 +12,6 @@ import {
   Leaf,
   MessageCircle,
   Plus,
-  RotateCcw,
   ShieldCheck,
   Sparkles,
   Share2,
@@ -23,15 +22,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog } from "@/components/dialog";
-import { useDinner } from "@/hooks/use-dinner";
+import { useDinner, type Recovery } from "@/hooks/use-dinner";
 import { createShareUrl, type NamePrivacy } from "@/lib/sharing";
 import { isSafeText } from "@/lib/validation";
 import {
   allocate,
   ageDefault,
   childName,
-  cleanBill,
-  exampleBill,
   generateMessage,
   householdName,
   householdWeight,
@@ -56,17 +53,21 @@ export default function MealSplitter() {
     actionWarning,
     blocked,
     linkError,
-    session,
-    legacy,
     readOnly,
-    replaceBill,
-    resetChanges,
-    createLocal,
-    viewOriginal,
-    openSaved,
+    saved,
+    recoveryWarning,
+    recoveries,
+    requiresReplacement,
+    hasCurrentBill,
+    newBill,
+    makeCopy,
+    loadExample,
+    recover,
+    continueBill,
   } = useDinner();
   const [notice, setNotice] = useState("");
-  const [confirm, setConfirm] = useState<"reset" | "example" | null>(null);
+  type Action = "new" | "copy" | "example" | Recovery["id"];
+  const [confirm, setConfirm] = useState<Action | null>(null);
   const [sharing, setSharing] = useState(false);
   const [privacy, setPrivacy] = useState<NamePrivacy>("initials");
   const [shareLink, setShareLink] = useState("");
@@ -103,13 +104,6 @@ export default function MealSplitter() {
         isSafeText(h.name, 1048576) &&
         h.children.every((c) => isSafeText(c.name, 1048576)),
     );
-  const edited =
-    bill.households.length > 0 ||
-    (bill.amount !== "" && bill.amount !== "0.00") ||
-    bill.tone !== "fun" ||
-    bill.title !== DEFAULT_TITLE ||
-    !!storageWarning ||
-    !!linkError;
   function patchHouse(id: string, patch: Partial<Household>) {
     setBill((b) => ({
       ...b,
@@ -187,14 +181,17 @@ export default function MealSplitter() {
       );
     }
   }
-  function requestAction(action: "reset" | "example") {
-    if (readOnly) return;
-    if (action === "reset" && session) {
-      setConfirm(action);
-      return;
-    }
-    if (edited) setConfirm(action);
-    else replaceBill(action === "reset" ? cleanBill() : exampleBill());
+  function performAction(action: Action) {
+    if (action === "new") newBill();
+    else if (action === "copy") makeCopy();
+    else if (action === "example") loadExample();
+    else recover(action);
+    setNotice("");
+  }
+  function requestAction(action: Action) {
+    if (!ready || (action === "example" && readOnly)) return;
+    if (requiresReplacement) setConfirm(action);
+    else performAction(action);
   }
   async function copyShare() {
     setShareError("");
@@ -231,7 +228,7 @@ export default function MealSplitter() {
             href="#"
             onClick={(e) => {
               e.preventDefault();
-              window.scrollTo({ top: 0, behavior: "smooth" });
+              continueBill();
             }}
           >
             <span className="brand-icon">
@@ -286,77 +283,80 @@ export default function MealSplitter() {
         {linkError && (
           <div className="warning" role="alert">
             <p>{linkError}</p>
-            <Button variant="outline" onClick={openSaved}>
-              Open my saved dinner
+            <Button variant="outline" onClick={continueBill}>
+              Continue my bill
             </Button>
-            <Button onClick={() => createLocal("new")}>Start new dinner</Button>
+            <Button onClick={() => requestAction("new")}>New bill</Button>
           </div>
         )}
         {!linkError && ready && (
-          <section className="shared-banner" aria-label="Dinner status">
+          <section
+            className={`shared-banner ${shared ? "" : "bill-status"}`}
+            aria-label="Bill status"
+          >
             <div>
-              <strong>
-                {shared
-                  ? "Read-only shared snapshot"
-                  : session
-                    ? "Local copy"
-                    : "Saved dinner"}
-              </strong>
-              <p>
-                {shared
-                  ? "This link always shows its original snapshot. Edit a copy to make changes."
-                  : session
-                    ? "This copy is local to this tab. Use Share changes to create a link that others can open or that you can keep for later."
-                    : "Your ordinary dinner is saved in this browser."}
-              </p>
+              {shared ? (
+                <>
+                  <strong>Shared bill · read-only</strong>
+                  <p>
+                    This link keeps its original values. Make a copy to edit.
+                  </p>
+                </>
+              ) : (
+                <p>
+                  {saved
+                    ? "Saved in this tab."
+                    : storageWarning
+                      ? "Not saved in this tab."
+                      : "Changes save in this tab."}{" "}
+                  Use Share to keep a link for later.
+                </p>
+              )}
             </div>
             <div className="shared-actions">
               {shared && (
-                <Button size="sm" onClick={() => createLocal("copy")}>
-                  Edit a copy
-                </Button>
-              )}
-              {shared && legacy && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => createLocal("recover")}
-                >
-                  Recover previous edits as a local copy
-                </Button>
-              )}
-              {session?.source && (
-                <Button variant="outline" size="sm" onClick={viewOriginal}>
-                  View original snapshot
+                <Button size="sm" onClick={() => requestAction("copy")}>
+                  Make a copy
                 </Button>
               )}
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => createLocal("new")}
+                onClick={() => requestAction("new")}
               >
-                Start new dinner
+                New bill
               </Button>
-              {(shared || session) && (
-                <Button variant="ghost" size="sm" onClick={openSaved}>
-                  Open my saved dinner
+              {shared && hasCurrentBill && (
+                <Button variant="ghost" size="sm" onClick={continueBill}>
+                  Continue my bill
                 </Button>
               )}
             </div>
-            {session && (
-              <details>
-                <summary>About local copies</summary>
-                <p>
-                  One working copy is kept per tab when session storage is
-                  available. Refresh can restore it while that page session
-                  remains available. Browsers may restore sessions or copy their
-                  initial state into a duplicated tab; those copies then edit
-                  independently. A local copy address does not transfer dinner
-                  data. Use Share changes to keep a portable snapshot.
-                </p>
-              </details>
-            )}
           </section>
+        )}
+        {(recoveries.length > 0 || recoveryWarning) && (
+          <details className="legacy-recovery">
+            <summary>Recover an earlier bill</summary>
+            <p>
+              These are bills saved by an earlier app version. Recovery replaces
+              this tab’s bill; the earlier stored data stays untouched.
+            </p>
+            {recoveryWarning && (
+              <p role="status" className="helper">
+                {recoveryWarning}
+              </p>
+            )}
+            {recoveries.map((source) => (
+              <Button
+                key={source.id}
+                variant="outline"
+                size="sm"
+                onClick={() => requestAction(source.id)}
+              >
+                {source.label}
+              </Button>
+            ))}
+          </details>
         )}
         {!linkError && (
           <div className="workspace">
@@ -378,16 +378,6 @@ export default function MealSplitter() {
                       <p>One total. We’ll take it from here.</p>
                     </div>
                   </div>
-                  {!readOnly && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => requestAction("reset")}
-                    >
-                      <RotateCcw size={14} />{" "}
-                      {session ? "Reset changes" : "Reset saved dinner"}
-                    </Button>
-                  )}
                 </div>
                 <label htmlFor="dinner-title" className="field-label">
                   Dinner title
@@ -456,9 +446,9 @@ export default function MealSplitter() {
                         ? "Read-only snapshot"
                         : storageWarning || blocked || linkError
                           ? "Not saved"
-                          : session
+                          : saved
                             ? "Saved in this tab"
-                            : "Saved on this device"}
+                            : "Ready to edit"}
                   </span>
                 </div>
               </section>
@@ -827,8 +817,7 @@ export default function MealSplitter() {
                       !bill.households.length
                     }
                   >
-                    <Share2 size={17} />{" "}
-                    {session ? "Share changes" : "Share dinner"}
+                    <Share2 size={17} /> Share
                   </Button>
                   <p>
                     Send a fixed snapshot. Recipients can edit a separate local
@@ -937,9 +926,7 @@ export default function MealSplitter() {
                   <br />
                   {shared
                     ? "Read-only link snapshot. No account needed."
-                    : session
-                      ? "Local to this tab. Share a link to keep it."
-                      : "Saved only in this browser. No account needed."}
+                    : "Local to this tab. Share a link to keep it."}
                 </span>
               </div>
             </aside>
@@ -966,21 +953,20 @@ export default function MealSplitter() {
       {confirm && (
         <Dialog titleId="confirm-title" onClose={() => setConfirm(null)}>
           <span className="icon-box coral">
-            <RotateCcw size={21} />
+            <Info size={21} />
           </span>
           <h2 id="confirm-title">
-            {confirm === "reset"
-              ? session
-                ? "Reset changes?"
-                : "Reset saved dinner?"
-              : "Load the example dinner?"}
+            {confirm === "new"
+              ? "Start a new bill?"
+              : confirm === "example"
+                ? "Load the example dinner?"
+                : "Replace your current bill?"}
           </h2>
           <p>
-            {confirm === "reset"
-              ? session
-                ? "This discards your changes and restores this local copy’s complete starting values. The local copy address stays the same."
-                : "This clears the ordinary dinner saved in this browser. A separate local copy is kept."
-              : "This will replace the currently open dinner with the fictional four-family dinner. A local copy’s starting values stay unchanged."}
+            {blocked
+              ? "Your previous bill could not be read. This action may replace its stored record. "
+              : "This replaces your current bill in this tab. "}
+            Keep its share link first if you want to return to it.
           </p>
           <div>
             <Button
@@ -988,23 +974,19 @@ export default function MealSplitter() {
               data-autofocus
               onClick={() => setConfirm(null)}
             >
-              Keep my dinner
+              Keep my bill
             </Button>
             <Button
               onClick={() => {
-                if (confirm === "reset" && session) resetChanges();
-                else
-                  replaceBill(
-                    confirm === "reset" ? cleanBill() : exampleBill(),
-                  );
+                performAction(confirm);
                 setConfirm(null);
               }}
             >
-              {confirm === "reset"
-                ? session
-                  ? "Reset changes"
-                  : "Reset saved dinner"
-                : "Load example"}
+              {confirm === "new"
+                ? "Start new bill"
+                : confirm === "example"
+                  ? "Load example"
+                  : "Replace bill"}
             </Button>
           </div>
         </Dialog>
@@ -1018,9 +1000,13 @@ export default function MealSplitter() {
           <p>
             This link includes the dinner title, household names, children’s
             ages, and either their names or initials. This app does not store
-            dinner details on a server. Your browser saves your draft, and the
-            link itself contains the snapshot. Anyone with the link can read its
+            dinner details on a server. Your tab saves your draft, and the link
+            itself contains the snapshot. Anyone with the link can read its
             contents.
+          </p>
+          <p className="helper">
+            This link saves the values shown now. Share again after editing to
+            keep the updated version.
           </p>
           <fieldset className="privacy-choices">
             <legend>Children’s names in this link</legend>

@@ -13,35 +13,32 @@ npm run dev
 
 Open http://localhost:3000. Start with a clean bill or choose **Load Example Dinner**. Enter the complete total including tax and tip, add households and adults, then add optional children. Each child's slider is independent. Age defaults are suggestions; customized percentages survive age changes until **Reset to age default** is selected. Results and the copy-ready message update immediately. A zero-adult household is supported.
 
-The ordinary saved dinner persists in this browser’s localStorage. Local working copies use a separate sessionStorage record for this tab. Private browsing, browser storage policies, or clearing site data may prevent persistence. Names and bill data are never sent to an analytics service. Clipboard copying requires HTTPS or localhost and browser permission; the preview can also be selected and copied manually. Reset and example replacement ask for confirmation when existing data would be replaced.
+Your editable bill saves automatically in this tab’s sessionStorage. Refresh restores the latest saved values. Each independent tab has its own bill; duplicated/opener-created tabs may start with a copy, then edit independently. Recovery after closing a tab or browser is not guaranteed. Keep an updated shared URL to save a version for later. Private browsing, blocked storage, or clearing site data may prevent refresh recovery. Storage failures show a warning and preserve previously saved bytes; you can keep editing in memory and Share before leaving. Names and bill data are never sent to analytics.
+
+**New bill** replaces the current tab’s work with a blank bill after confirmation if it contains data. **Load Example Dinner** uses the same replacement protection. There is no whole-bill Reset. Child **Reset to age default** remains available.
 
 ## Share a configured dinner
 
-Give your bill a **Dinner title**, configure the households and portions, then choose **Share dinner**. The privacy dialog defaults to children's initials; **Keep names as entered** is optional. Both modes retain ages. Household names and the dinner title remain unchanged. The choice changes only the outgoing snapshot, never your names in the editor.
+Give your bill a **Dinner title**, configure the households and portions, then choose **Share**. The privacy dialog starts with children’s initials selected; **Keep names as entered** is optional. Ages remain included in both modes. Household names and the title stay unchanged. The choice transforms only the outgoing snapshot, never the editor’s names.
 
-The copied link contains a fixed, read-only snapshot in its URL fragment. There is no shared server record: old links always show their encoded original. A recipient selects **Edit a copy** to create an editable local session and uses **Share changes** to send a revised snapshot back. Names omitted by an initials-only link cannot be recovered. Ages remain excluded from the generated group text.
+Two experiences keep the flow simple:
 
-Three addresses keep these modes separate:
+- The plain app URL opens **your bill**, editable and autosaved in this tab. The working address contains no bill data or draft pointer. Copying it does not transfer your bill.
+- A `#share=v1.…` URL opens a **shared bill**, read-only and fixed to its encoded values. Viewing it preserves this tab’s editable work. **Make a copy** imports the displayed snapshot into your bill after confirmation if it replaces existing work. **Continue my bill** and the app logo return to existing work without importing the snapshot.
 
-- The base app URL opens your ordinary saved dinner. **Reset saved dinner** clears only that dinner after confirmation.
-- A `#share=v1.…` link always opens its original snapshot read-only. Titles, totals, names, ages, portions, adults, and message tone cannot change under that address.
-- **Edit a copy** opens `?draft=<UUID>` in the same tab without a shared fragment. This opaque identifier only selects the matching local record in this tab; it is not a public dinner ID, authentication credential, or server lookup. Copying this address does not transfer the dinner.
+**Share** captures the currently displayed values without changing your working address. Share again after editing to keep the revised version: earlier links do not update. Identical serialized values may produce identical URLs. Open a saved link and choose **Make a copy** to resume editing after closing a tab. Messages remain live and copy as plain text, without children’s ages. Clipboard access needs HTTPS or localhost and browser permission; manual copying is available when blocked.
 
-One active local working copy is stored per tab, with separate starting values and current edits. Refresh restores the matching copy while its page-session storage remains available. **Reset changes** restores all starting values after confirmation and keeps the same address. **Load Example Dinner** changes current values only. **Start new dinner** creates a different blank local copy and never clears your ordinary saved dinner; replacing an edited active copy asks for confirmation even when you are viewing a snapshot or your saved dinner.
+Browser Back/Forward can revisit immutable snapshots but does not resurrect an editable bill deliberately replaced by New bill. There is no bill library or cross-tab synchronization.
 
-**View original snapshot**, browser Back/Forward, and **Open my saved dinner** preserve a stored working copy. **Share changes** always opens the privacy dialog with initials selected, exports current values to a portable fragment link without a draft query, and leaves your working address and original snapshot unchanged. Identical serialized snapshots can produce identical links.
+Earlier browser-wide saved bills, shared overrides, and version 1 tab records are read-only recovery sources. They are never automatically loaded into new tabs or deleted. When available, **Recover an earlier bill** offers explicit imports identifying their source. A matching old `?draft=` address can recover only its matching validated record in that tab. Previous shared edits are offered only when their digest matches the viewed snapshot. Recovery writes a new-format bill without changing legacy bytes. Invalid/mismatched addresses never reveal another bill.
 
-Session storage is not a durable saved-dinner library. Browsers may restore page sessions after closing or copy their initial state into duplicated/opener-created tabs; subsequent tab edits are independent. Missing, corrupt, mismatched, or unavailable local records show an unavailable-copy message with recovery actions and never reveal another copy. Storage failures preserve existing stored bytes, warn about unsaved edits, and permit in-memory editing; leaving may lose those edits. Browser-close warnings are best effort.
-
-Older shared-link overrides never replace the original. If a validated legacy record matches the original snapshot’s digest, **Recover previous edits as a local copy** explicitly creates a new session with those edits and the original reset baseline. Legacy bytes remain untouched. Ordinary saved dinners without a title still migrate to the default without losing other values.
-
-Anyone with a link can read or change its contents. Encoding is not encryption or proof of identity. Links can remain in browser history and messages and cannot be individually revoked. Local storage is unencrypted; all projects under the same `derrick-tao.github.io` origin share access to it. Initials do not guarantee anonymity.
+Anyone with a shared URL can read its contents or construct a different valid snapshot. Encoding is not encryption or proof of identity. Links can remain in browser history and messages and cannot be individually revoked. Browser storage is unencrypted; projects under the same `derrick-tao.github.io` origin share origin access. Initials do not guarantee anonymity. There is no application server storing dinners.
 
 ## Sharing security
 
-See [the snapshot/session requirements](docs/snapshot-session-requirements.md) and [the sharing/security baseline](docs/sharing-requirements.md). Version 1 has one `#share=v1.<unpadded-base64url>` payload containing uncompressed UTF-8 JSON. It accepts only the documented version, object fields, numeric ranges, and name/ID types. It rejects noncanonical encoding, invalid UTF-8, unknown/prototype-related keys, unexpected nesting, controls and explicit bidi controls, and malformed data without overwriting drafts. Normal multilingual letters, emoji, combining marks, apostrophes, and hyphens remain supported. Names and titles render as React text and never become HTML, CSS, scripts, or navigation destinations. Shared identifiers are regenerated without names.
+See [the approved simplified bill requirements](docs/simplified-bill-requirements.md) and [the sharing/security baseline](docs/sharing-requirements.md). The earlier [snapshot/session requirements](docs/snapshot-session-requirements.md) are superseded where they differ. Version 1 has one `#share=v1.<unpadded-base64url>` payload containing uncompressed UTF-8 JSON. It accepts only the documented version, object fields, numeric ranges, and name/ID types. It rejects noncanonical encoding, invalid UTF-8, unknown/prototype-related keys, unexpected nesting, controls and explicit bidi controls, and malformed data without overwriting drafts. Normal multilingual letters, emoji, combining marks, apostrophes, and hyphens remain supported. Names and titles render as React text and never become HTML, CSS, scripts, or navigation destinations. Shared identifiers are regenerated without names.
 
-Sharing limits are 8,000 URL characters, 256 KiB decoded bytes (the URL limit yields a much smaller effective v1 payload), 200 households plus children, depth eight, and 120 Unicode characters per name/title. Each local record has a 1 MiB serialized limit, including both baseline and current values in a working copy; incomplete amount input may still be restored and edited. Oversized/invalid links and failed storage writes preserve existing data. No dinner details are logged, analyzed, shortened externally, or sent to an application backend.
+Sharing limits are 8,000 URL characters, 256 KiB decoded bytes (the URL limit yields a much smaller effective v1 payload), 200 households plus children, depth eight, and 120 Unicode characters per name/title. Each local record has a 1 MiB serialized limit, including its version and current bill; incomplete amount input may still be restored and edited. Oversized/invalid links and failed storage writes preserve existing data. No dinner details are logged, analyzed, shortened externally, or sent to an application backend.
 
 The static Pages build adds an early Content Security Policy to every exported HTML page. Inline Next.js hydration scripts use exact build-generated SHA-256 hashes; scripts cannot use `unsafe-inline` or `unsafe-eval`. Numeric progress styling has a separate inline-style allowance. Meta CSP cannot set HSTS or `frame-ancestors`; no such host-level protection is claimed. Context-safe rendering and schema validation remain the primary input defenses.
 
@@ -57,7 +54,7 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-Playwright starts the production server automatically after a build. Tests cover both desktop Chrome and a narrow Pixel 7 viewport, clipboard equality, persistence, independent sliders, example values, reset confirmation, and overflow. Screenshots are written to `test-results/`. On a fresh Linux machine, use `npx playwright install --with-deps chromium` if OS browser dependencies are missing.
+Playwright starts the production server automatically after a build. Tests cover both desktop Chrome and a narrow Pixel 7 viewport, clipboard equality, persistence, independent sliders, example values, replacement confirmations, same-browser tab isolation, recovery/failure handling, and overflow. Screenshots are written to `test-results/`. On a fresh Linux machine, use `npx playwright install --with-deps chromium` if OS browser dependencies are missing.
 
 ```sh
 npm run format
@@ -76,10 +73,11 @@ The external-server mode tests the actual static export and its generated CSP. T
 
 - `lib/meal.ts`: types, age defaults, state validation, pure child update helpers, USD input parsing, exact cent allocation, example fixture, and message generation.
 - `lib/sharing.ts` and `lib/validation.ts`: strict share codec, privacy transformation, schema reconstruction, and draft validation.
-- `lib/sessions.ts`: strict local pointer grammar, versioned session records, baseline/source validation, and trusted address construction.
-- `hooks/use-dinner.ts`: separate read-only snapshots, ordinary saved dinners, per-tab working copies, and guarded navigation/recovery.
+- `lib/tab-bill.ts`: strict version 2 per-tab current-bill schema and replacement detection.
+- `lib/sessions.ts`: read-only legacy pointer/session validation and trusted address construction.
+- `hooks/use-dinner.ts`: one per-tab editable bill, read-only snapshots, accurate persistence status, and guarded navigation/recovery.
 - `scripts/static-csp.mjs`: build-time CSP hashing and insertion for static Pages.
-- `components/meal-splitter.tsx`: responsive editor, dashboard, localStorage, confirmations, and clipboard flow.
+- `components/meal-splitter.tsx`: responsive editor, dashboard, replacement/privacy confirmations, and clipboard flow.
 - `components/ui/`: local, editable shadcn-style button and input primitives.
 - `app/globals.css`: Tailwind integration and responsive visual styles.
 - `tests/meal.test.ts`: calculation, message, input validation, and persisted-state unit tests.
@@ -112,7 +110,7 @@ python3 -m http.server 8080 --directory out
 
 GitHub serves `out/` at the repository subpath; local HTTP servers serve it at their root. For a local preview with the exact repository subpath, place or symlink `out/` inside a static server root as `family-meal-splitter-web/`.
 
-The normal `npm run build` and `npm run start` commands continue to support Next.js hosting at the site root, including Vercel. Bill data is stored per browser origin, so bills entered on the temporary tunnel do not automatically appear on the GitHub Pages domain.
+The normal `npm run build` and `npm run start` commands continue to support Next.js hosting at the site root, including Vercel. Active bill data is stored per tab and origin. Use a shared snapshot URL to transfer its values; a plain app URL does not contain them.
 
 ## Deploy to Vercel
 

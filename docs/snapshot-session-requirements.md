@@ -1,5 +1,7 @@
 # Snapshot reset and local session requirements
 
+> Superseded where behavior differs by the user-approved [simplified bill requirements](simplified-bill-requirements.md). The financial, privacy, and input-security baseline continues to apply.
+
 Source: https://chatgpt.com/space/page_38e8e6d98ddc8191b34eb7e9db3434fa
 
 This draft revises how [Family Meal Splitter](https://derrick-tao.github.io/family-meal-splitter-web/) separates original shared snapshots from editable copies. It replaces the previous rule that reopening a shared URL could restore local edits associated with that URL. All existing title, privacy, input-security, financial calculation, accessibility, and deployment requirements continue to apply unless explicitly changed here.

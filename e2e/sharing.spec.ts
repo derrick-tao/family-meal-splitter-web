@@ -1,21 +1,46 @@
 import { test, expect, type Page } from "@playwright/test";
-import { exampleBill, STORAGE_KEY } from "../lib/meal";
+import { cleanBill, exampleBill, STORAGE_KEY } from "../lib/meal";
 import { createShareUrl, snapshotDigest } from "../lib/sharing";
-import { SESSION_STORAGE_KEY, newSession } from "../lib/sessions";
-const sharedKey = "family-meal-splitter-shared-v1";
-async function share(page: Page, entered = false) {
+import {
+  newSession,
+  SESSION_STORAGE_KEY,
+  SHARED_STORAGE_KEY,
+} from "../lib/sessions";
+import { TAB_BILL_KEY } from "../lib/tab-bill";
+
+const originals = ["$62.67", "$40.44", "$90.98", "$60.65"];
+const revisions = ["$68.58", "$39.19", "$88.18", "$58.79"];
+const title = (page: Page) => page.getByLabel("Dinner title", { exact: true });
+function snapshot(bill = exampleBill()) {
+  const base = new URL(test.info().project.use.baseURL as string);
+  return createShareUrl(bill, "entered", base.origin, base.pathname);
+}
+async function payments(page: Page, values = originals) {
+  for (const [i, value] of values.entries())
+    await expect(page.getByTestId(`payment-${i}`)).toHaveText(value);
+}
+async function raw(page: Page) {
+  return page.evaluate((key) => sessionStorage.getItem(key), TAB_BILL_KEY);
+}
+async function accept(
+  page: Page,
+  action: "Replace bill" | "Start new bill" | "Load example",
+) {
   await page
-    .getByRole("button", { name: /^(Share dinner|Share changes)$/ })
+    .getByRole("dialog")
+    .getByRole("button", { name: action, exact: true })
     .click();
+}
+async function share(page: Page, entered = true) {
+  await page.getByRole("button", { name: "Share", exact: true }).click();
+  await expect(
+    page.getByRole("radio", { name: "Use children’s initials" }),
+  ).toBeChecked();
   await expect(page.getByRole("dialog")).toContainText(
-    "Ages stay included in both options.",
+    "Share again after editing",
   );
   if (entered)
     await page.getByRole("radio", { name: "Keep names as entered" }).check();
-  else
-    await expect(
-      page.getByRole("radio", { name: "Use children’s initials" }),
-    ).toBeChecked();
   await page
     .getByRole("button", { name: "Copy share link", exact: true })
     .click();
@@ -25,144 +50,176 @@ async function share(page: Page, entered = false) {
   await expect
     .poll(() => page.evaluate(() => navigator.clipboard.readText()))
     .toBe(url);
+  expect(new URL(url).search).toBe("");
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
   return url;
 }
-test("original snapshots stay read-only while independent local copies reset and share revisions", async ({
+
+test("snapshots stay immutable while a plain-address copy edits, refreshes, and shares revisions", async ({
   page,
   browser,
 }) => {
-  await page.goto("./");
-  await page.getByRole("button", { name: "Load Example Dinner" }).click();
-  await page
-    .getByLabel("Dinner title", { exact: true })
-    .fill("Family A dinner");
-  const fullUrl = await share(page, true);
-  const recipient = await browser.newContext({
-    permissions: ["clipboard-read", "clipboard-write"],
-  });
-  const other = await recipient.newPage();
-  await other.goto("./");
-  await other
-    .getByLabel("Dinner title", { exact: true })
-    .fill("Family B dinner");
-  await expect
-    .poll(() => other.evaluate((key) => localStorage.getItem(key), STORAGE_KEY))
-    .toContain("Family B dinner");
-  const ordinary = await other.evaluate(
-    (key) => localStorage.getItem(key),
-    STORAGE_KEY,
-  );
-  await other.goto(fullUrl);
-  await expect(other.getByLabel("Dinner title", { exact: true })).toHaveValue(
-    "Family A dinner",
-  );
-  for (const control of await other
-    .locator(".editor input, .editor button")
-    .all())
-    await expect(control).toBeDisabled();
+  const original = snapshot();
+  await page.goto(original);
+  await payments(page);
+  for (const input of await page.locator(".editor input, .editor button").all())
+    await expect(input).toBeDisabled();
   await expect(
-    other.getByRole("button", { name: "Load Example Dinner" }),
+    page.getByRole("button", { name: "Load Example Dinner" }),
   ).toHaveCount(0);
   await expect(
-    other.getByRole("button", { name: "✨ Simple", exact: true }),
-  ).toBeDisabled();
-  await expect(
-    other.getByRole("button", { name: "Reset changes", exact: true }),
+    page.getByRole("button", { name: /Reset changes|Reset saved dinner/ }),
   ).toHaveCount(0);
-  for (const [i, value] of ["$62.67", "$40.44", "$90.98", "$60.65"].entries())
-    await expect(other.getByTestId(`payment-${i}`)).toHaveText(value);
-  await other.getByRole("button", { name: "Edit a copy", exact: true }).click();
-  const draftUrl = other.url();
-  expect(new URL(draftUrl).search).toMatch(/^\?draft=[0-9a-f-]{36}$/);
-  expect(new URL(draftUrl).hash).toBe("");
-  const slider = other.getByLabel("Portion for Child A2", { exact: true });
+  await page.getByRole("button", { name: "Make a copy", exact: true }).click();
+  expect(new URL(page.url()).search).toBe("");
+  expect(new URL(page.url()).hash).toBe("");
+  const working = page.url();
+  const slider = page.getByLabel("Portion for Child A2", { exact: true });
   await slider.fill("50");
-  for (const [i, value] of ["$68.58", "$39.19", "$88.18", "$58.79"].entries())
-    await expect(other.getByTestId(`payment-${i}`)).toHaveText(value);
-  await other.reload();
+  await payments(page, revisions);
+  await page.reload();
   await expect(slider).toHaveValue("50");
-  const revised = await share(other, true);
-  expect(revised).not.toBe(fullUrl);
-  expect(new URL(revised).search).toBe("");
-  expect(other.url()).toBe(draftUrl);
-  await other
-    .getByRole("button", { name: "Reset changes", exact: true })
-    .click();
-  await other
-    .getByRole("button", { name: "Keep my dinner", exact: true })
-    .click();
-  await expect(slider).toHaveValue("50");
-  await other
-    .getByRole("button", { name: "Reset changes", exact: true })
-    .click();
-  await other
-    .getByRole("dialog")
-    .getByRole("button", { name: "Reset changes", exact: true })
-    .click();
-  await expect(slider).toHaveValue("30");
-  expect(other.url()).toBe(draftUrl);
-  await other.getByRole("link", { name: "family meal splitter" }).click();
-  expect(other.url()).toBe(draftUrl);
-  await other
-    .getByRole("button", { name: "View original snapshot", exact: true })
-    .click();
-  await expect(
-    other.getByLabel("Dinner title", { exact: true }),
-  ).toBeDisabled();
-  expect(other.url()).toBe(fullUrl);
-  await other.goBack();
-  await expect(slider).toHaveValue("30");
-  await other.goForward();
+  const revised = await share(page);
+  expect(revised).not.toBe(original);
+  expect(page.url()).toBe(working);
+  await page.getByRole("button", { name: "Copy Message" }).click();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+    await page.getByTestId("message").innerText(),
+  );
+  await page.goBack();
   await expect(slider).toBeDisabled();
-  await other
-    .getByRole("button", { name: "Open my saved dinner", exact: true })
+  await payments(page);
+  await page
+    .getByRole("button", { name: "Continue my bill", exact: true })
     .click();
-  await expect(other.getByLabel("Dinner title", { exact: true })).toHaveValue(
-    "Family B dinner",
-  );
-  expect(
-    await other.evaluate((key) => localStorage.getItem(key), STORAGE_KEY),
-  ).toBe(ordinary);
-  const fresh = await browser.newContext();
-  const freshPage = await fresh.newPage();
-  await freshPage.goto(draftUrl);
-  await expect(freshPage.locator("main [role=alert]")).toContainText(
-    "This local copy is not available in this tab",
-  );
-  await freshPage.goto(revised);
-  await expect(freshPage.getByTestId("payment-0")).toHaveText("$68.58");
-  await freshPage.goto(fullUrl);
-  await expect(freshPage.getByTestId("payment-0")).toHaveText("$62.67");
+  await expect(slider).toHaveValue("50");
+  const recipient = await browser.newContext();
+  const other = await recipient.newPage();
+  await other.goto(revised);
+  await payments(other, revisions);
+  await expect(title(other)).toBeDisabled();
+  await other.goto(original);
+  await payments(other);
   await recipient.close();
-  await fresh.close();
 });
-test("initials retain ages, dialog resets privacy, and clipboard failure exposes a manual link", async ({
+
+test("independent no-opener tabs in the same browser context never share editable work", async ({
   page,
-  browser,
+  context,
+}) => {
+  await page.goto("./");
+  await title(page).fill("Family A bill");
+  const first = await raw(page);
+  const other = await context.newPage();
+  await other.goto("./");
+  await expect(title(other)).toHaveValue("Dinner bill");
+  expect(await raw(other)).toBeNull();
+  await title(other).fill("Family B bill");
+  await other.reload();
+  await expect(title(other)).toHaveValue("Family B bill");
+  await page.reload();
+  await expect(title(page)).toHaveValue("Family A bill");
+  expect(await raw(page)).toBe(first);
+  await other.getByRole("button", { name: "New bill", exact: true }).click();
+  await accept(other, "Start new bill");
+  await expect(title(other)).toHaveValue("Dinner bill");
+  await page.reload();
+  await expect(title(page)).toHaveValue("Family A bill");
+  await other.close();
+});
+
+test("opener-created tabs inherit an initial copy then edit and replace independently", async ({
+  page,
+}) => {
+  await page.goto("./");
+  await title(page).fill("Family A bill");
+  const pending = page.waitForEvent("popup");
+  await page.evaluate((url) => {
+    window.open(url, "_blank");
+  }, page.url());
+  const other = await pending;
+  await expect(title(other)).toHaveValue("Family A bill");
+  await title(other).fill("Family B bill");
+  await other.reload();
+  await expect(title(other)).toHaveValue("Family B bill");
+  await page.reload();
+  await expect(title(page)).toHaveValue("Family A bill");
+  await page.getByRole("button", { name: "New bill", exact: true }).click();
+  await accept(page, "Start new bill");
+  await other.reload();
+  await expect(title(other)).toHaveValue("Family B bill");
+  await other.close();
+});
+
+test("viewing a shared bill preserves current work; copy and New bill cancellations preserve bytes", async ({
+  page,
+}) => {
+  await page.goto("./");
+  await title(page).fill("Family B bill");
+  const stored = await raw(page);
+  const url = snapshot();
+  await page.goto(url);
+  await payments(page);
+  expect(await raw(page)).toBe(stored);
+  for (const action of ["Make a copy", "New bill"]) {
+    await page.getByRole("button", { name: action, exact: true }).click();
+    await expect(page.getByRole("dialog")).toContainText(
+      "Keep its share link first",
+    );
+    await page
+      .getByRole("button", { name: "Keep my bill", exact: true })
+      .click();
+    expect(page.url()).toBe(url);
+    expect(await raw(page)).toBe(stored);
+    await payments(page);
+  }
+  await page
+    .getByRole("button", { name: "Continue my bill", exact: true })
+    .click();
+  await expect(title(page)).toHaveValue("Family B bill");
+  await page.goBack();
+  await payments(page);
+  await page.goForward();
+  await expect(title(page)).toHaveValue("Family B bill");
+  await page.goto(url);
+  await page.getByRole("button", { name: "Make a copy", exact: true }).click();
+  await accept(page, "Replace bill");
+  await payments(page);
+  await expect(title(page)).toBeEnabled();
+  await page.getByRole("button", { name: "New bill", exact: true }).click();
+  await accept(page, "Start new bill");
+  await expect(page.getByLabel("Total bill amount")).toHaveValue("0.00");
+  await page.reload();
+  await page.getByRole("button", { name: "New bill", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+});
+
+test("privacy keeps ages, initials default anew, dialog keyboard works and fallback is usable on 320px", async ({
+  page,
 }) => {
   await page.goto("./");
   await page.getByRole("button", { name: "Load Example Dinner" }).click();
-  const url = await share(page);
+  const url = await share(page, false);
+  await page.goto(url);
   await expect(page.getByLabel("Child 1 name in Family A")).toHaveValue(
-    "Child A1",
-  );
-  const otherContext = await browser.newContext();
-  const other = await otherContext.newPage();
-  await other.goto(url);
-  await expect(other.getByLabel("Child 1 name in Family A")).toHaveValue(
     "C. A.",
   );
   await expect(
-    other.getByLabel("Age of C. A.", { exact: true }).first(),
+    page.getByLabel("Age of C. A.", { exact: true }).first(),
   ).toHaveValue("4");
-  await page.getByRole("button", { name: "Share dinner", exact: true }).click();
-  await page.getByRole("radio", { name: "Keep names as entered" }).check();
-  await page.getByRole("button", { name: "Cancel", exact: true }).click();
-  await page.getByRole("button", { name: "Share dinner", exact: true }).click();
+  await page.setViewportSize({ width: 320, height: 900 });
+  await page.getByRole("button", { name: "Share", exact: true }).click();
   await expect(
     page.getByRole("radio", { name: "Use children’s initials" }),
-  ).toBeChecked();
+  ).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(
+    page.getByRole("button", { name: "Copy share link", exact: true }),
+  ).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(
+    page.getByRole("radio", { name: "Use children’s initials" }),
+  ).toBeFocused();
   await page.evaluate(() =>
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -172,319 +229,419 @@ test("initials retain ages, dialog resets privacy, and clipboard failure exposes
   await page
     .getByRole("button", { name: "Copy share link", exact: true })
     .click();
-  await expect(
-    page.getByRole("alert").filter({ hasText: "Copy unavailable" }),
-  ).toContainText("copy it manually");
+  await expect(page.getByRole("dialog").getByRole("alert")).toContainText(
+    "copy it manually",
+  );
   await expect(
     page.getByRole("textbox", { name: "Share link", exact: true }),
   ).not.toHaveValue("");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(
-    page.getByRole("button", { name: "Share dinner", exact: true }),
+    page.getByRole("button", { name: "Share", exact: true }),
   ).toBeFocused();
-  await otherContext.close();
 });
-test("malformed links and corrupt storage never overwrite saved bytes", async ({
+
+test("legacy browser and tab bills recover explicitly into the new key without changing old bytes", async ({
   page,
 }) => {
   await page.goto("./");
+  const earlier = exampleBill();
+  earlier.title = "Family A earlier bill";
+  const oldTab = newSession(earlier);
+  oldTab.current.title = "Family B earlier bill";
   const values = {
-    ordinary: '{"invalid":"keep ordinary"}',
-    shared: '{"invalid":"keep shared"}',
-    other: "unrelated",
+    browser: JSON.stringify(earlier),
+    tab: JSON.stringify(oldTab),
   };
   await page.evaluate(
-    ({ key, sharedKey, values }) => {
-      localStorage.setItem(key, values.ordinary);
-      localStorage.setItem(sharedKey, values.shared);
-      localStorage.setItem("unrelated", values.other);
+    ({ values, ordinary, tab }) => {
+      localStorage.setItem(ordinary, values.browser);
+      sessionStorage.setItem(tab, values.tab);
     },
-    { key: STORAGE_KEY, sharedKey, values },
+    { values, ordinary: STORAGE_KEY, tab: SESSION_STORAGE_KEY },
   );
   await page.reload();
-  await expect(page.getByRole("status")).toContainText(
-    "Existing data is preserved",
-  );
-  await expect(page.getByText("Not saved", { exact: true })).toBeVisible();
-  await expect(
-    page.getByText("Saved on this device", { exact: true }),
-  ).toHaveCount(0);
-  const url = new URL(page.url());
-  url.hash = "#share=v1.bad%bad";
-  await page.goto(url.href);
-  await expect(
-    page.getByRole("alert").filter({ hasText: "This shared dinner link" }),
-  ).toContainText("saved dinners are unchanged");
-  await expect(page.locator(".workspace")).toHaveCount(0);
-  await expect(
-    page.getByText("Saved on this device", { exact: true }),
-  ).toHaveCount(0);
+  await expect(title(page)).toHaveValue("Dinner bill");
+  expect(await raw(page)).toBeNull();
+  await page.getByText("Recover an earlier bill", { exact: true }).click();
+  await page
+    .getByRole("button", { name: "Recover earlier browser bill", exact: true })
+    .click();
+  await expect(title(page)).toHaveValue(earlier.title);
+  await page
+    .getByRole("button", { name: "Recover earlier tab bill", exact: true })
+    .click();
+  await accept(page, "Replace bill");
+  await expect(title(page)).toHaveValue(oldTab.current.title);
   expect(
     await page.evaluate(
-      ({ key, sharedKey }) => [
-        localStorage.getItem(key),
-        localStorage.getItem(sharedKey),
-        localStorage.getItem("unrelated"),
+      ({ ordinary, tab }) => [
+        localStorage.getItem(ordinary),
+        sessionStorage.getItem(tab),
       ],
-      { key: STORAGE_KEY, sharedKey },
+      { ordinary: STORAGE_KEY, tab: SESSION_STORAGE_KEY },
     ),
-  ).toEqual([values.ordinary, values.shared, values.other]);
+  ).toEqual([values.browser, values.tab]);
 });
-test("hostile text stays inert under the exported CSP", async ({ page }) => {
-  const base = new URL(test.info().project.use.baseURL as string);
-  const bill = exampleBill();
-  bill.title = "<img src=x onerror=alert(1)> & ? # %";
-  bill.households[0].name = "javascript:alert(1)";
-  bill.households[0].children[0].name = "<svg onload=alert(1)>";
-  const url = createShareUrl(bill, "entered", base.origin, base.pathname);
-  const errors: string[] = [];
-  page.on("pageerror", (e) => errors.push(e.message));
+
+test("matching legacy shared edits recover explicitly and never override the original", async ({
+  page,
+}) => {
+  const url = snapshot(),
+    prior = exampleBill();
+  prior.households[0].children[1].percentage = 50;
+  prior.households[0].children[1].overridden = true;
+  const stored = JSON.stringify({
+    snapshot: await snapshotDigest(new URL(url).hash),
+    bill: prior,
+  });
+  await page.goto("./");
+  await page.evaluate(({ key, stored }) => localStorage.setItem(key, stored), {
+    key: SHARED_STORAGE_KEY,
+    stored,
+  });
+  await page.goto(url);
+  await payments(page);
+  await page.getByText("Recover an earlier bill", { exact: true }).click();
+  await page
+    .getByRole("button", {
+      name: "Recover earlier edits to this link",
+      exact: true,
+    })
+    .click();
+  await payments(page, revisions);
+  expect(
+    await page.evaluate((key) => localStorage.getItem(key), SHARED_STORAGE_KEY),
+  ).toBe(stored);
+  await page.goto(url);
+  await payments(page);
+});
+
+test("delayed legacy digest cannot unlock snapshots or publish stale views after navigation", async ({
+  page,
+}) => {
+  const url = snapshot();
+  const earlier = JSON.stringify({
+    snapshot: await snapshotDigest(new URL(url).hash),
+    bill: exampleBill(),
+  });
+  await page.goto("./");
+  await title(page).fill("Family B current bill");
+  const stored = await raw(page),
+    base = page.url();
+  await page.evaluate(
+    ({ key, earlier }) => {
+      localStorage.setItem(key, earlier);
+      const digest = crypto.subtle.digest.bind(crypto.subtle);
+      const pending: Array<() => Promise<void>> = [];
+      Object.defineProperty(crypto.subtle, "digest", {
+        configurable: true,
+        value: (algorithm: AlgorithmIdentifier, data: BufferSource) =>
+          new Promise<ArrayBuffer>((resolve, reject) => {
+            pending.push(async () => {
+              try {
+                resolve(await digest(algorithm, data));
+              } catch (error) {
+                reject(error);
+              }
+            });
+          }),
+      });
+      Object.defineProperty(window, "pendingDigestCount", {
+        get: () => pending.length,
+      });
+      Object.defineProperty(window, "flushDigests", {
+        value: async () => {
+          await Promise.all(pending.splice(0).map((job) => job()));
+        },
+      });
+    },
+    { key: SHARED_STORAGE_KEY, earlier },
+  );
+  await page.evaluate((hash) => {
+    location.hash = hash;
+  }, new URL(url).hash);
+  await expect.poll(() => page.evaluate("window.pendingDigestCount")).toBe(1);
+  await expect(title(page)).toHaveValue("Dinner bill");
+  for (const control of await page
+    .locator(".editor input, .editor button")
+    .all())
+    await expect(control).toBeDisabled();
+  await payments(page);
+  expect(await raw(page)).toBe(stored);
+  await page.goBack();
+  await expect(title(page)).toHaveValue("Family B current bill");
+  await expect(title(page)).toBeEnabled();
+  expect(page.url()).toBe(base);
+  await page.evaluate("window.flushDigests()");
+  await expect(title(page)).toHaveValue("Family B current bill");
+  await expect(title(page)).toBeEnabled();
+  expect(await raw(page)).toBe(stored);
+  await page.goForward();
+  await expect.poll(() => page.evaluate("window.pendingDigestCount")).toBe(1);
+  await payments(page);
+  await expect(title(page)).toBeDisabled();
+  await page
+    .getByRole("button", { name: "Continue my bill", exact: true })
+    .click();
+  await page.evaluate("window.flushDigests()");
+  await expect(title(page)).toHaveValue("Family B current bill");
+  await expect(title(page)).toBeEnabled();
+  await page.goBack();
+  await expect.poll(() => page.evaluate("window.pendingDigestCount")).toBe(1);
+  await payments(page);
+  await page.getByRole("button", { name: "Make a copy", exact: true }).click();
+  await accept(page, "Replace bill");
+  await title(page).fill("Family C copied bill");
+  const copied = await raw(page);
+  await page.evaluate("window.flushDigests()");
+  expect(page.url()).toBe(base);
+  await expect(title(page)).toHaveValue("Family C copied bill");
+  await expect(title(page)).toBeEnabled();
+  expect(await raw(page)).toBe(copied);
+  expect(
+    await page.evaluate((key) => localStorage.getItem(key), SHARED_STORAGE_KEY),
+  ).toBe(earlier);
+});
+
+test("old pointers only recover a matching validated record and reject ambiguous addresses", async ({
+  page,
+}) => {
+  const old = newSession(exampleBill());
+  const stored = JSON.stringify(old);
+  await page.goto("./");
+  await page.evaluate(
+    ({ key, stored }) => sessionStorage.setItem(key, stored),
+    { key: SESSION_STORAGE_KEY, stored },
+  );
+  const base = new URL(page.url());
+  for (const suffix of [
+    "?draft=bad",
+    "?draft=" + crypto.randomUUID(),
+    "?draft=" + old.id + "&draft=" + old.id,
+    "?draft=" + old.id + new URL(snapshot()).hash,
+  ]) {
+    await page.goto(base.href + suffix);
+    await expect(page.locator("main [role=alert]")).toBeVisible();
+    await expect(page.locator(".workspace")).toHaveCount(0);
+    await expect(
+      page.getByRole("button", {
+        name: "Recover earlier tab bill",
+        exact: true,
+      }),
+    ).toHaveCount(0);
+    expect(
+      await page.evaluate(
+        (key) => sessionStorage.getItem(key),
+        SESSION_STORAGE_KEY,
+      ),
+    ).toBe(stored);
+    expect(await raw(page)).toBeNull();
+  }
+  await page.goto(base.href + "?draft=" + old.id);
+  await page.getByText("Recover an earlier bill", { exact: true }).click();
+  await page
+    .getByRole("button", { name: "Recover earlier tab bill", exact: true })
+    .click();
+  await payments(page);
+  expect(new URL(page.url()).search).toBe("");
+  expect(
+    await page.evaluate(
+      (key) => sessionStorage.getItem(key),
+      SESSION_STORAGE_KEY,
+    ),
+  ).toBe(stored);
+});
+
+test("corrupt active records are preserved until explicit replacement; invalid snapshots cannot overwrite", async ({
+  page,
+}) => {
+  const stored = "{unreadable bill";
+  await page.goto("./");
+  await page.evaluate(
+    ({ key, stored }) => sessionStorage.setItem(key, stored),
+    { key: TAB_BILL_KEY, stored },
+  );
+  await page.reload();
+  await expect(
+    page.getByRole("status").filter({ hasText: "previous bill" }),
+  ).toContainText("stored data is preserved");
+  await title(page).fill("Family A memory");
+  expect(await raw(page)).toBe(stored);
+  const url = snapshot();
+  await page.evaluate((hash) => {
+    location.hash = hash;
+  }, new URL(url).hash);
+  await payments(page);
+  for (const action of ["Make a copy", "New bill"]) {
+    await page.getByRole("button", { name: action, exact: true }).click();
+    await expect(page.getByRole("dialog")).toContainText("could not be read");
+    await page
+      .getByRole("button", { name: "Keep my bill", exact: true })
+      .click();
+    expect(await raw(page)).toBe(stored);
+    expect(page.url()).toBe(url);
+  }
+  await page.getByRole("button", { name: "Make a copy", exact: true }).click();
+  await accept(page, "Replace bill");
+  await payments(page);
+  expect(await raw(page)).not.toBe(stored);
+  const valid = await raw(page);
+  const bad = new URL(page.url());
+  bad.hash = "#share=v1.bad%bad";
+  await page.goto(bad.href);
+  await expect(page.locator("main [role=alert]")).toContainText(
+    "saved dinners are unchanged",
+  );
+  expect(await raw(page)).toBe(valid);
+});
+
+test("failed writes preserve saved bytes and unsaved memory through snapshot and Continue navigation", async ({
+  page,
+}) => {
+  await page.goto("./");
+  await page.getByRole("button", { name: "Load Example Dinner" }).click();
+  const stored = await raw(page);
+  await page.evaluate((key) => {
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (k, v) {
+      if (this === sessionStorage && k === key) throw new Error("quota");
+      return original.call(this, k, v);
+    };
+    Object.defineProperty(window, "restoreWrites", {
+      value: () => {
+        Storage.prototype.setItem = original;
+      },
+    });
+  }, TAB_BILL_KEY);
+  await title(page).fill("Family A in memory");
+  await expect(
+    page.getByRole("status").filter({ hasText: "not saved" }),
+  ).toContainText("use Share");
+  expect(await raw(page)).toBe(stored);
+  await page.evaluate((hash) => {
+    location.hash = hash;
+  }, new URL(snapshot()).hash);
+  await payments(page);
+  await expect(title(page)).toHaveValue("Dinner bill");
+  await page
+    .getByRole("button", { name: "Continue my bill", exact: true })
+    .click();
+  await expect(title(page)).toHaveValue("Family A in memory");
+  expect(await raw(page)).toBe(stored);
+  const revised = await share(page);
+  expect(revised).toContain("#share=v1.");
+  await page.evaluate("window.restoreWrites()");
+  await title(page).fill("Family A saved again");
+  await expect(
+    page.getByText("Saved in this tab", { exact: true }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(title(page)).toHaveValue("Family A saved again");
+});
+
+test("unavailable storage permits in-memory editing and sharing with accurate status", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const get = Storage.prototype.getItem,
+      set = Storage.prototype.setItem;
+    Storage.prototype.getItem = function (key) {
+      if (this === sessionStorage) throw new Error("unavailable");
+      return get.call(this, key);
+    };
+    Storage.prototype.setItem = function (key, value) {
+      if (this === sessionStorage) throw new Error("unavailable");
+      return set.call(this, key, value);
+    };
+  });
+  await page.goto(snapshot());
+  await payments(page);
+  await page.getByRole("button", { name: "Make a copy", exact: true }).click();
+  await expect(page.getByRole("dialog")).toContainText("could not be read");
+  await accept(page, "Replace bill");
+  await title(page).fill("Family A in memory");
+  await expect(page.getByText("Not saved", { exact: true })).toBeVisible();
+  const url = await share(page);
+  expect(url).toContain("#share=v1.");
+});
+
+test("failed app navigation preserves display, current memory, URL, and stored bytes", async ({
+  page,
+}) => {
+  await page.goto("./");
+  await title(page).fill("Family B original work");
+  const stored = await raw(page);
+  const url = snapshot();
+  await page.evaluate((hash) => {
+    location.hash = hash;
+  }, new URL(url).hash);
+  await payments(page);
+  await page.evaluate(() => {
+    history.pushState = () => {
+      throw new Error("history unavailable");
+    };
+  });
+  for (const [action, button] of [
+    ["Make a copy", "Replace bill"],
+    ["New bill", "Start new bill"],
+  ] as const) {
+    await page.getByRole("button", { name: action, exact: true }).click();
+    await accept(page, button);
+    await expect(
+      page.getByRole("status").filter({ hasText: "action could not" }),
+    ).toContainText("unchanged");
+    expect(page.url()).toBe(url);
+    expect(await raw(page)).toBe(stored);
+    await expect(title(page)).toHaveValue("Dinner bill");
+    await payments(page);
+  }
+  await page
+    .getByRole("button", { name: "Continue my bill", exact: true })
+    .click();
+  expect(page.url()).toBe(url);
+  expect(await raw(page)).toBe(stored);
+  await page.goBack();
+  await expect(title(page)).toHaveValue("Family B original work");
+});
+
+test("hostile names remain literal with no attacker execution or external requests", async ({
+  page,
+}) => {
+  const base = new URL(test.info().project.use.baseURL as string),
+    bill = exampleBill();
+  bill.title = "Family A <img src=x onerror=alert(1)> & ? # %";
+  bill.households[0].name = "Family A javascript:alert(1)";
+  bill.households[0].children[0].name = "Child A1 <svg onload=alert(1)>";
+  const errors: string[] = [],
+    external: string[] = [];
   let dialogs = 0;
+  page.on("pageerror", (e) => errors.push(e.message));
   page.on("dialog", async (d) => {
     dialogs++;
     await d.dismiss();
   });
-  const external: string[] = [];
   page.on("request", (r) => {
     if (new URL(r.url()).origin !== base.origin) external.push(r.url());
   });
-  await page.goto(url);
-  await expect(page.getByLabel("Dinner title", { exact: true })).toHaveValue(
-    bill.title,
-  );
+  await page.goto(snapshot(bill));
+  await expect(title(page)).toHaveValue(bill.title);
   await expect(page.locator("#split-heading")).toHaveText(bill.title);
   await expect(page.locator('img[src="x"],svg[onload]')).toHaveCount(0);
   expect(dialogs).toBe(0);
-  expect(external).toEqual([]);
   expect(errors).toEqual([]);
-  await page.getByRole("button", { name: "Copy Message" }).click();
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
-    await page.getByTestId("message").innerText(),
-  );
+  expect(external).toEqual([]);
+  await page.getByRole("button", { name: "Make a copy", exact: true }).click();
+  const url = await share(page);
+  await page.goto(url);
+  await expect(title(page)).toHaveValue(bill.title);
 });
 
-test("active edited sessions require replacement confirmation even from an original or ordinary dinner", async ({
-  page,
-}) => {
-  const base = new URL(test.info().project.use.baseURL as string);
-  const link = createShareUrl(
-    exampleBill(),
-    "entered",
-    base.origin,
-    base.pathname,
-  );
-  await page.goto(link);
-  await page.getByRole("button", { name: "Edit a copy", exact: true }).click();
-  const firstUrl = page.url();
-  await page
-    .getByLabel("Dinner title", { exact: true })
-    .fill("Family A edited");
-  await expect
-    .poll(() =>
-      page.evaluate((key) => sessionStorage.getItem(key), SESSION_STORAGE_KEY),
-    )
-    .toContain("Family A edited");
-  await page
-    .getByRole("button", { name: "View original snapshot", exact: true })
-    .click();
-  page.once("dialog", (d) => d.dismiss());
-  await page
-    .getByRole("button", { name: "Start new dinner", exact: true })
-    .click();
-  expect(page.url()).toBe(link);
-  await page
-    .getByRole("button", { name: "Open my saved dinner", exact: true })
-    .click();
-  page.once("dialog", (d) => d.dismiss());
-  await page
-    .getByRole("button", { name: "Start new dinner", exact: true })
-    .click();
-  expect(new URL(page.url()).search).toBe("");
-  page.once("dialog", (d) => d.accept());
-  await page
-    .getByRole("button", { name: "Start new dinner", exact: true })
-    .click();
-  expect(page.url()).not.toBe(firstUrl);
-  await expect(page.getByLabel("Dinner title", { exact: true })).toHaveValue(
-    "Dinner bill",
-  );
-  await expect(page.getByLabel("Total bill amount")).toHaveValue("0.00");
-  await page.getByRole("button", { name: "Load Example Dinner" }).click();
-  await expect(page.getByTestId("payment-0")).toHaveText("$62.67");
-  await page
-    .getByRole("button", { name: "Reset changes", exact: true })
-    .click();
-  await page
-    .getByRole("dialog")
-    .getByRole("button", { name: "Reset changes", exact: true })
-    .click();
-  await expect(page.getByLabel("Total bill amount")).toHaveValue("0.00");
-  await expect(page.getByTestId("payment-0")).toHaveCount(0);
-});
-test("matching legacy edits recover explicitly with the original as reset baseline", async ({
-  page,
-}) => {
-  const base = new URL(test.info().project.use.baseURL as string);
-  const link = createShareUrl(
-    exampleBill(),
-    "entered",
-    base.origin,
-    base.pathname,
-  );
-  const prior = exampleBill();
-  prior.title = "Family A previous edits";
-  const raw = JSON.stringify({
-    snapshot: await snapshotDigest(new URL(link).hash),
-    bill: prior,
-  });
-  await page.goto("./");
-  await page.evaluate(({ key, raw }) => localStorage.setItem(key, raw), {
-    key: sharedKey,
-    raw,
-  });
-  await page.goto(link);
-  await expect(page.getByLabel("Dinner title", { exact: true })).toHaveValue(
-    "Dinner bill",
-  );
-  await page
-    .getByRole("button", {
-      name: "Recover previous edits as a local copy",
-      exact: true,
-    })
-    .click();
-  await expect(page.getByLabel("Dinner title", { exact: true })).toHaveValue(
-    prior.title,
-  );
-  await page
-    .getByRole("button", { name: "Reset changes", exact: true })
-    .click();
-  await page
-    .getByRole("dialog")
-    .getByRole("button", { name: "Reset changes", exact: true })
-    .click();
-  await expect(page.getByLabel("Dinner title", { exact: true })).toHaveValue(
-    "Dinner bill",
-  );
-  expect(
-    await page.evaluate((key) => localStorage.getItem(key), sharedKey),
-  ).toBe(raw);
-  await page
-    .getByRole("button", { name: "View original snapshot", exact: true })
-    .click();
-  await page.evaluate(
-    (key) => localStorage.setItem(key, "corrupt previous edits"),
-    sharedKey,
-  );
-  await page.reload();
-  await expect(page.getByTestId("payment-0")).toHaveText("$62.67");
-  await expect(page.getByRole("status")).toContainText(
-    "older stored data is preserved",
-  );
-  expect(
-    await page.evaluate((key) => localStorage.getItem(key), sharedKey),
-  ).toBe("corrupt previous edits");
-});
-test("invalid, mismatched and ambiguous local pointers preserve records without draft disclosure", async ({
-  page,
-}) => {
-  const session = newSession(exampleBill());
-  await page.goto("./");
-  const raw = JSON.stringify(session);
-  await page.evaluate(({ key, raw }) => sessionStorage.setItem(key, raw), {
-    key: SESSION_STORAGE_KEY,
-    raw,
-  });
-  const base = new URL(page.url());
-  const different = newSession(exampleBill()).id;
-  for (const query of [
-    "?draft=" + different,
-    "?draft=bad",
-    "?draft=" + session.id + "&draft=" + session.id,
-    "?draft=" + session.id + "#share=v1.bad",
-  ]) {
-    await page.goto(base.href + query);
-    await expect(page.locator("main [role=alert]")).toBeVisible();
-    await expect(page.getByTestId("payment-0")).toHaveCount(0);
-    expect(
-      await page.evaluate(
-        (key) => sessionStorage.getItem(key),
-        SESSION_STORAGE_KEY,
-      ),
-    ).toBe(raw);
-  }
-  for (const rejected of ["corrupt", "x".repeat(1048577)]) {
-    await page.evaluate(
-      ({ key, rejected }) => sessionStorage.setItem(key, rejected),
-      { key: SESSION_STORAGE_KEY, rejected },
-    );
-    await page.goto(base.href + "?draft=" + session.id);
-    await expect(page.locator("main [role=alert]")).toContainText(
-      "This local copy is not available in this tab",
-    );
-    expect(
-      await page.evaluate(
-        (key) => sessionStorage.getItem(key),
-        SESSION_STORAGE_KEY,
-      ),
-    ).toBe(rejected);
-  }
-});
-test("failed session writes warn, guard navigation, and recover after storage works", async ({
-  page,
-}) => {
-  const base = new URL(test.info().project.use.baseURL as string);
-  await page.goto(
-    createShareUrl(exampleBill(), "entered", base.origin, base.pathname),
-  );
-  await page.getByRole("button", { name: "Edit a copy", exact: true }).click();
-  const link = page.url();
-  await page.evaluate(() => {
-    Object.defineProperty(window, "restoreStorageWrite", {
-      value: Storage.prototype.setItem,
-      configurable: true,
-    });
-    Storage.prototype.setItem = function () {
-      throw new Error("quota");
-    };
-  });
-  await page
-    .getByLabel("Dinner title", { exact: true })
-    .fill("Family A unsaved");
-  await expect(page.getByRole("status")).toContainText(
-    "Changes cannot be saved",
-  );
-  page.once("dialog", (d) => d.dismiss());
-  await page
-    .getByRole("button", { name: "Open my saved dinner", exact: true })
-    .click();
-  expect(page.url()).toBe(link);
-  await expect(page.getByLabel("Dinner title", { exact: true })).toHaveValue(
-    "Family A unsaved",
-  );
-  await page.evaluate(() => {
-    Storage.prototype.setItem = (
-      window as unknown as {
-        restoreStorageWrite: typeof Storage.prototype.setItem;
-      }
-    ).restoreStorageWrite;
-  });
-  await page.getByLabel("Dinner title", { exact: true }).fill("Family A saved");
-  await expect(
-    page.getByRole("status").filter({ hasText: "Changes cannot be saved" }),
-  ).toHaveCount(0);
-  await expect
-    .poll(() =>
-      page.evaluate((key) => sessionStorage.getItem(key), SESSION_STORAGE_KEY),
-    )
-    .toContain("Family A saved");
-  await page
-    .getByRole("button", { name: "Open my saved dinner", exact: true })
-    .click();
-  await expect(page.getByLabel("Dinner title", { exact: true })).toHaveValue(
-    "Dinner bill",
-  );
-});
 test("single-line controls cannot enter names or copied messages", async ({
   page,
 }) => {
@@ -493,178 +650,39 @@ test("single-line controls cannot enter names or copied messages", async ({
   const input = page.getByLabel("Child 1 name in Family A");
   await input.fill("Child A1\u202e");
   await expect(input).toHaveValue("Child A1");
-  await page
-    .getByLabel("Dinner title", { exact: true })
-    .fill("Family A dinner\u2066");
-  await expect(page.getByLabel("Dinner title", { exact: true })).toHaveValue(
-    "Dinner bill",
-  );
+  await title(page).fill("Family A dinner\u2066");
+  await expect(title(page)).toHaveValue("Dinner bill");
   await page.getByRole("button", { name: "Copy Message" }).click();
   const copied = await page.evaluate(() => navigator.clipboard.readText());
   expect(copied).not.toMatch(/[\u202a-\u202e\u2066-\u2069]/u);
   expect(copied).toBe(await page.getByTestId("message").innerText());
 });
 
-test("opener-created tabs can inherit initial local storage but then edit independently", async ({
+test("example replacement and tiny changes are protected; incomplete amount survives refresh", async ({
   page,
 }) => {
-  const base = new URL(test.info().project.use.baseURL as string);
-  await page.goto(
-    createShareUrl(exampleBill(), "entered", base.origin, base.pathname),
-  );
-  await page.getByRole("button", { name: "Edit a copy", exact: true }).click();
-  await page
-    .getByLabel("Dinner title", { exact: true })
-    .fill("Family A original tab");
-  await expect
-    .poll(() =>
-      page.evaluate((key) => sessionStorage.getItem(key), SESSION_STORAGE_KEY),
-    )
-    .toContain("Family A original tab");
-  const popupPromise = page.waitForEvent("popup");
-  await page.evaluate((url) => {
-    window.open(url, "_blank");
-  }, page.url());
-  const popup = await popupPromise;
-  await expect(popup.getByLabel("Dinner title", { exact: true })).toHaveValue(
-    "Family A original tab",
-  );
-  await popup
-    .getByLabel("Dinner title", { exact: true })
-    .fill("Family B copied tab");
-  await popup.reload();
-  await expect(popup.getByLabel("Dinner title", { exact: true })).toHaveValue(
-    "Family B copied tab",
-  );
-  await expect(page.getByLabel("Dinner title", { exact: true })).toHaveValue(
-    "Family A original tab",
-  );
-  await page.reload();
-  await expect(page.getByLabel("Dinner title", { exact: true })).toHaveValue(
-    "Family A original tab",
-  );
-  await popup.close();
-});
-
-test("unavailable session storage permits an honestly unsaved in-memory copy", async ({
-  page,
-}) => {
-  await page.addInitScript(() => {
-    const originalGet = Storage.prototype.getItem,
-      originalSet = Storage.prototype.setItem;
-    Storage.prototype.getItem = function (key) {
-      if (this === sessionStorage) throw new Error("unavailable");
-      return originalGet.call(this, key);
-    };
-    Storage.prototype.setItem = function (key, value) {
-      if (this === sessionStorage) throw new Error("unavailable");
-      return originalSet.call(this, key, value);
-    };
-  });
-  const base = new URL(test.info().project.use.baseURL as string);
-  await page.goto(
-    createShareUrl(exampleBill(), "entered", base.origin, base.pathname),
-  );
-  page.once("dialog", (d) => d.accept());
-  await page.getByRole("button", { name: "Edit a copy", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText(
-    "Changes cannot be saved",
-  );
-  await page
-    .getByLabel("Dinner title", { exact: true })
-    .fill("Family A in memory");
-  await expect(page.getByText("Not saved", { exact: true })).toBeVisible();
-  page.once("dialog", (d) => d.dismiss());
-  await page
-    .getByRole("button", { name: "View original snapshot", exact: true })
-    .click();
-  await expect(page.getByLabel("Dinner title", { exact: true })).toHaveValue(
-    "Family A in memory",
-  );
-});
-
-test("replacing a rejected local record requires stated consequences and cancellation preserves bytes", async ({
-  page,
-}) => {
-  const base = new URL(test.info().project.use.baseURL as string);
-  const link = createShareUrl(
-    exampleBill(),
-    "entered",
-    base.origin,
-    base.pathname,
-  );
   await page.goto("./");
-  await page.evaluate(
-    (key) => sessionStorage.setItem(key, "corrupt prior data"),
-    SESSION_STORAGE_KEY,
-  );
-  for (const address of [link, base.href]) {
-    await page.goto(address);
-    const title = await page
-      .getByLabel("Dinner title", { exact: true })
-      .inputValue();
-    const actions =
-      address === link
-        ? ["Edit a copy", "Start new dinner"]
-        : ["Start new dinner"];
-    for (const name of actions) {
-      page.once("dialog", async (d) => {
-        expect(d.message()).toContain("may replace its stored record");
-        await d.dismiss();
-      });
-      await page.getByRole("button", { name, exact: true }).click();
-      expect(page.url()).toBe(address);
-      await expect(
-        page.getByLabel("Dinner title", { exact: true }),
-      ).toHaveValue(title);
-      expect(
-        await page.evaluate(
-          (key) => sessionStorage.getItem(key),
-          SESSION_STORAGE_KEY,
-        ),
-      ).toBe("corrupt prior data");
-    }
-  }
-  page.once("dialog", (d) => d.accept());
-  await page
-    .getByRole("button", { name: "Start new dinner", exact: true })
-    .click();
-  expect(new URL(page.url()).search).toMatch(/^\?draft=/);
-  await expect(page.getByLabel("Total bill amount")).toHaveValue("0.00");
-});
-
-test("failed draft navigation preserves the existing session record", async ({
-  page,
-}) => {
-  const base = new URL(test.info().project.use.baseURL as string);
-  const link = createShareUrl(
-    exampleBill(),
-    "entered",
-    base.origin,
-    base.pathname,
-  );
-  const session = newSession(exampleBill()),
-    raw = JSON.stringify(session);
-  await page.goto(link);
-  await page.evaluate(
-    ({ key, raw }) => {
-      sessionStorage.setItem(key, raw);
-      history.pushState = () => {
-        throw new DOMException("History unavailable", "SecurityError");
-      };
-    },
-    { key: SESSION_STORAGE_KEY, raw },
-  );
-  await page.getByRole("button", { name: "Edit a copy", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText(
-    "stored records are unchanged",
-  );
-  expect(page.url()).toBe(link);
-  expect(
-    await page.evaluate(
-      (key) => sessionStorage.getItem(key),
-      SESSION_STORAGE_KEY,
-    ),
-  ).toBe(raw);
-  await expect(page.getByTestId("payment-0")).toHaveText("$62.67");
+  await title(page).fill("Family A bill");
+  const stored = await raw(page);
+  await page.getByRole("button", { name: "Load Example Dinner" }).click();
+  await page.getByRole("button", { name: "Keep my bill", exact: true }).click();
+  expect(await raw(page)).toBe(stored);
+  await page.getByRole("button", { name: "Load Example Dinner" }).click();
+  await accept(page, "Load example");
+  await payments(page);
+  await page.getByLabel("Total bill amount").fill("incomplete");
+  await page.reload();
+  await expect(page.getByLabel("Total bill amount")).toHaveValue("incomplete");
+  await expect(
+    page.getByRole("button", { name: "Share", exact: true }),
+  ).toBeDisabled();
+  await page.getByRole("button", { name: "New bill", exact: true }).click();
+  await accept(page, "Start new bill");
+  expect(JSON.parse((await raw(page))!)).toEqual({
+    version: 2,
+    bill: cleanBill(),
+  });
+  await page.getByRole("button", { name: "Load Example Dinner" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await payments(page);
 });
