@@ -3,9 +3,11 @@ test("build a dinner, adjust independent portions, copy, and restore", async ({
   page,
 }) => {
   await page.goto("./");
-  await page.getByLabel("Total bill amount").fill("100.01");
   await page
-    .getByRole("button", { name: "Add Household", exact: true })
+    .getByRole("textbox", { name: /^(Dinner total|Total bill amount)$/ })
+    .fill("100.01");
+  await page
+    .getByRole("button", { name: /Add (a )?household/i, exact: true })
     .click();
   await page.getByLabel("Household 1 name").fill("Family A");
   await page.getByRole("button", { name: "Add Child", exact: true }).click();
@@ -28,7 +30,7 @@ test("build a dinner, adjust independent portions, copy, and restore", async ({
     page.getByLabel("Portion for Child A2", { exact: true }),
   ).toHaveValue("25");
   await page
-    .getByRole("button", { name: "Add Household", exact: true })
+    .getByRole("button", { name: /Add (a )?household/i, exact: true })
     .click();
   await page.getByLabel("Household 2 name").fill("Family B");
   await expect(page.getByTestId("payment-0")).toHaveText("$61.54");
@@ -57,7 +59,9 @@ test("example dinner and slider update; New bill can be cancelled", async ({
   page,
 }) => {
   await page.goto("./");
-  await page.getByRole("button", { name: "Load Example Dinner" }).click();
+  await page
+    .getByRole("button", { name: /Try an example|Load Example Dinner/ })
+    .click();
   for (const [i, amount] of ["$62.67", "$40.44", "$90.98", "$60.65"].entries())
     await expect(page.getByTestId(`payment-${i}`)).toHaveText(amount);
   const slider = page.getByLabel("Portion for Child A2", { exact: true });
@@ -77,6 +81,8 @@ test("example dinner and slider update; New bill can be cancelled", async ({
     .getByRole("dialog")
     .getByRole("button", { name: "Start new bill", exact: true })
     .click();
-  await expect(page.getByLabel("Total bill amount")).toHaveValue("0.00");
+  await expect(
+    page.getByRole("textbox", { name: /^(Dinner total|Total bill amount)$/ }),
+  ).toHaveValue("0.00");
   await expect(page.getByTestId("payment-0")).toHaveCount(0);
 });

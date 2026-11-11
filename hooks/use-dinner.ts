@@ -300,7 +300,7 @@ export function useDinner() {
   const replaceWork = useCallback(
     (bill: Bill) => {
       const s = current.current;
-      if (!s.ready) return;
+      if (!s.ready) return false;
       let next: Bill;
       try {
         next = cloneBill(bill);
@@ -310,10 +310,10 @@ export function useDinner() {
           actionWarning:
             "This bill could not be opened. Your current work and stored data are unchanged.",
         });
-        return;
+        return false;
       }
       const href = goEditor();
-      if (!href) return;
+      if (!href) return false;
       ++loadTicket.current;
       locationHref.current = href;
       publish({
@@ -327,6 +327,7 @@ export function useDinner() {
       });
       void loadView(href);
       window.scrollTo({ top: 0 });
+      return true;
     },
     [goEditor, loadView, persist, publish],
   );

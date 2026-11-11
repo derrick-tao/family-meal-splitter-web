@@ -60,6 +60,7 @@ describe("replacement protection", () => {
   });
   it.each([
     { title: "Family A" },
+    { title: "" },
     { amount: "" },
     { amount: "0." },
     { tone: "simple" as const },

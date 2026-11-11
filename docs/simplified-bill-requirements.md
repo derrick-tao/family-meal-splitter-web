@@ -4,6 +4,8 @@ Source: https://chatgpt.com/space/page_001e39c19fe48191abf365bc2b494b05
 
 **Approved by the user on 2026-11-11 after independent clarity review.**
 
+The [approved bill-first entry requirements](bill-first-entry-requirements.md) supersede this document’s zero-household presentation, initial action labels, saving-status placement, and clean-blank New bill visibility. Its financial, persistence, sharing, privacy, security, and replacement rules remain in force.
+
 The app should let someone create a bill, refresh without losing progress, and save or exchange a fixed version by keeping a shared URL. Every tab has one independent editable bill. Shared links display their encoded values read-only. Remove the different saved-dinner and local-copy experiences and remove whole-bill Reset actions.
 
 # Agreed product decisions

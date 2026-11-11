@@ -11,6 +11,14 @@ import { TAB_BILL_KEY } from "../lib/tab-bill";
 const originals = ["$62.67", "$40.44", "$90.98", "$60.65"];
 const revisions = ["$68.58", "$39.19", "$88.18", "$58.79"];
 const title = (page: Page) => page.getByLabel("Dinner title", { exact: true });
+async function fillTitle(page: Page, value: string) {
+  const reveal = page.getByRole("button", {
+    name: "Add a dinner name",
+    exact: true,
+  });
+  if (await reveal.isVisible()) await reveal.click();
+  await title(page).fill(value);
+}
 function snapshot(bill = exampleBill()) {
   const base = new URL(test.info().project.use.baseURL as string);
   return createShareUrl(bill, "entered", base.origin, base.pathname);
@@ -65,7 +73,7 @@ test("snapshots stay immutable while a plain-address copy edits, refreshes, and 
   for (const input of await page.locator(".editor input, .editor button").all())
     await expect(input).toBeDisabled();
   await expect(
-    page.getByRole("button", { name: "Load Example Dinner" }),
+    page.getByRole("button", { name: /Try an example|Load Example Dinner/ }),
   ).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: /Reset changes|Reset saved dinner/ }),
@@ -108,13 +116,13 @@ test("independent no-opener tabs in the same browser context never share editabl
   context,
 }) => {
   await page.goto("./");
-  await title(page).fill("Family A bill");
+  await fillTitle(page, "Family A bill");
   const first = await raw(page);
   const other = await context.newPage();
   await other.goto("./");
   await expect(title(other)).toHaveValue("Dinner bill");
   expect(await raw(other)).toBeNull();
-  await title(other).fill("Family B bill");
+  await fillTitle(other, "Family B bill");
   await other.reload();
   await expect(title(other)).toHaveValue("Family B bill");
   await page.reload();
@@ -132,14 +140,14 @@ test("opener-created tabs inherit an initial copy then edit and replace independ
   page,
 }) => {
   await page.goto("./");
-  await title(page).fill("Family A bill");
+  await fillTitle(page, "Family A bill");
   const pending = page.waitForEvent("popup");
   await page.evaluate((url) => {
     window.open(url, "_blank");
   }, page.url());
   const other = await pending;
   await expect(title(other)).toHaveValue("Family A bill");
-  await title(other).fill("Family B bill");
+  await fillTitle(other, "Family B bill");
   await other.reload();
   await expect(title(other)).toHaveValue("Family B bill");
   await page.reload();
@@ -155,7 +163,7 @@ test("viewing a shared bill preserves current work; copy and New bill cancellati
   page,
 }) => {
   await page.goto("./");
-  await title(page).fill("Family B bill");
+  await fillTitle(page, "Family B bill");
   const stored = await raw(page);
   const url = snapshot();
   await page.goto(url);
@@ -188,9 +196,13 @@ test("viewing a shared bill preserves current work; copy and New bill cancellati
   await expect(title(page)).toBeEnabled();
   await page.getByRole("button", { name: "New bill", exact: true }).click();
   await accept(page, "Start new bill");
-  await expect(page.getByLabel("Total bill amount")).toHaveValue("0.00");
+  await expect(
+    page.getByRole("textbox", { name: /^(Dinner total|Total bill amount)$/ }),
+  ).toHaveValue("0.00");
   await page.reload();
-  await page.getByRole("button", { name: "New bill", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "New bill", exact: true }),
+  ).toHaveCount(0);
   await expect(page.getByRole("dialog")).toHaveCount(0);
 });
 
@@ -198,7 +210,9 @@ test("privacy keeps ages, initials default anew, dialog keyboard works and fallb
   page,
 }) => {
   await page.goto("./");
-  await page.getByRole("button", { name: "Load Example Dinner" }).click();
+  await page
+    .getByRole("button", { name: /Try an example|Load Example Dinner/ })
+    .click();
   const url = await share(page, false);
   await page.goto(url);
   await expect(page.getByLabel("Child 1 name in Family A")).toHaveValue(
@@ -331,7 +345,7 @@ test("delayed legacy digest cannot unlock snapshots or publish stale views after
     bill: exampleBill(),
   });
   await page.goto("./");
-  await title(page).fill("Family B current bill");
+  await fillTitle(page, "Family B current bill");
   const stored = await raw(page),
     base = page.url();
   await page.evaluate(
@@ -397,7 +411,7 @@ test("delayed legacy digest cannot unlock snapshots or publish stale views after
   await payments(page);
   await page.getByRole("button", { name: "Make a copy", exact: true }).click();
   await accept(page, "Replace bill");
-  await title(page).fill("Family C copied bill");
+  await fillTitle(page, "Family C copied bill");
   const copied = await raw(page);
   await page.evaluate("window.flushDigests()");
   expect(page.url()).toBe(base);
@@ -471,7 +485,7 @@ test("corrupt active records are preserved until explicit replacement; invalid s
   await expect(
     page.getByRole("status").filter({ hasText: "previous bill" }),
   ).toContainText("stored data is preserved");
-  await title(page).fill("Family A memory");
+  await fillTitle(page, "Family A memory");
   expect(await raw(page)).toBe(stored);
   const url = snapshot();
   await page.evaluate((hash) => {
@@ -505,7 +519,9 @@ test("failed writes preserve saved bytes and unsaved memory through snapshot and
   page,
 }) => {
   await page.goto("./");
-  await page.getByRole("button", { name: "Load Example Dinner" }).click();
+  await page
+    .getByRole("button", { name: /Try an example|Load Example Dinner/ })
+    .click();
   const stored = await raw(page);
   await page.evaluate((key) => {
     const original = Storage.prototype.setItem;
@@ -519,7 +535,7 @@ test("failed writes preserve saved bytes and unsaved memory through snapshot and
       },
     });
   }, TAB_BILL_KEY);
-  await title(page).fill("Family A in memory");
+  await fillTitle(page, "Family A in memory");
   await expect(
     page.getByRole("status").filter({ hasText: "not saved" }),
   ).toContainText("use Share");
@@ -537,7 +553,7 @@ test("failed writes preserve saved bytes and unsaved memory through snapshot and
   const revised = await share(page);
   expect(revised).toContain("#share=v1.");
   await page.evaluate("window.restoreWrites()");
-  await title(page).fill("Family A saved again");
+  await fillTitle(page, "Family A saved again");
   await expect(
     page.getByText("Saved in this tab", { exact: true }),
   ).toBeVisible();
@@ -565,7 +581,7 @@ test("unavailable storage permits in-memory editing and sharing with accurate st
   await page.getByRole("button", { name: "Make a copy", exact: true }).click();
   await expect(page.getByRole("dialog")).toContainText("could not be read");
   await accept(page, "Replace bill");
-  await title(page).fill("Family A in memory");
+  await fillTitle(page, "Family A in memory");
   await expect(page.getByText("Not saved", { exact: true })).toBeVisible();
   const url = await share(page);
   expect(url).toContain("#share=v1.");
@@ -575,7 +591,7 @@ test("failed app navigation preserves display, current memory, URL, and stored b
   page,
 }) => {
   await page.goto("./");
-  await title(page).fill("Family B original work");
+  await fillTitle(page, "Family B original work");
   const stored = await raw(page);
   const url = snapshot();
   await page.evaluate((hash) => {
@@ -646,11 +662,13 @@ test("single-line controls cannot enter names or copied messages", async ({
   page,
 }) => {
   await page.goto("./");
-  await page.getByRole("button", { name: "Load Example Dinner" }).click();
+  await page
+    .getByRole("button", { name: /Try an example|Load Example Dinner/ })
+    .click();
   const input = page.getByLabel("Child 1 name in Family A");
   await input.fill("Child A1\u202e");
   await expect(input).toHaveValue("Child A1");
-  await title(page).fill("Family A dinner\u2066");
+  await fillTitle(page, "Family A dinner\u2066");
   await expect(title(page)).toHaveValue("Dinner bill");
   await page.getByRole("button", { name: "Copy Message" }).click();
   const copied = await page.evaluate(() => navigator.clipboard.readText());
@@ -662,17 +680,25 @@ test("example replacement and tiny changes are protected; incomplete amount surv
   page,
 }) => {
   await page.goto("./");
-  await title(page).fill("Family A bill");
+  await fillTitle(page, "Family A bill");
   const stored = await raw(page);
-  await page.getByRole("button", { name: "Load Example Dinner" }).click();
+  await page
+    .getByRole("button", { name: /Try an example|Load Example Dinner/ })
+    .click();
   await page.getByRole("button", { name: "Keep my bill", exact: true }).click();
   expect(await raw(page)).toBe(stored);
-  await page.getByRole("button", { name: "Load Example Dinner" }).click();
+  await page
+    .getByRole("button", { name: /Try an example|Load Example Dinner/ })
+    .click();
   await accept(page, "Load example");
   await payments(page);
-  await page.getByLabel("Total bill amount").fill("incomplete");
+  await page
+    .getByRole("textbox", { name: /^(Dinner total|Total bill amount)$/ })
+    .fill("incomplete");
   await page.reload();
-  await expect(page.getByLabel("Total bill amount")).toHaveValue("incomplete");
+  await expect(
+    page.getByRole("textbox", { name: /^(Dinner total|Total bill amount)$/ }),
+  ).toHaveValue("incomplete");
   await expect(
     page.getByRole("button", { name: "Share", exact: true }),
   ).toBeDisabled();
@@ -682,7 +708,9 @@ test("example replacement and tiny changes are protected; incomplete amount surv
     version: 2,
     bill: cleanBill(),
   });
-  await page.getByRole("button", { name: "Load Example Dinner" }).click();
+  await page
+    .getByRole("button", { name: /Try an example|Load Example Dinner/ })
+    .click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await payments(page);
 });

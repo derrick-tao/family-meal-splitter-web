@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUpRight,
@@ -12,6 +12,7 @@ import {
   Leaf,
   MessageCircle,
   Plus,
+  Pencil,
   ShieldCheck,
   Sparkles,
   Share2,
@@ -77,6 +78,26 @@ export default function MealSplitter() {
     const timer = setTimeout(() => setNotice(""), 3500);
     return () => clearTimeout(timer);
   }, [notice]);
+  const entry = !readOnly && !linkError && bill.households.length === 0;
+  const [titleOpen, setTitleOpen] = useState(false);
+  const titleExpanded = titleOpen || bill.title !== DEFAULT_TITLE;
+  const titleRef = useRef<HTMLInputElement>(null);
+  const addRef = useRef<HTMLButtonElement>(null);
+  const focusTarget = useRef<string | null>(null);
+  const previousEntry = useRef(entry);
+  useEffect(() => {
+    if (entry && !previousEntry.current) setTitleOpen(false);
+    previousEntry.current = entry;
+    const target = focusTarget.current;
+    if (!target) return;
+    const node =
+      target === "entry" ? addRef.current : document.getElementById(target);
+    if (node) {
+      node.focus();
+      node.scrollIntoView({ block: "nearest" });
+      focusTarget.current = null;
+    }
+  }, [bill.households, entry]);
   const cents = parseCents(bill.amount);
   let rows: Allocation[] = [];
   let error = "";
@@ -137,12 +158,11 @@ export default function MealSplitter() {
     }));
   }
   function addHouse() {
+    const id = crypto.randomUUID();
+    focusTarget.current = `household-${id}`;
     setBill((b) => ({
       ...b,
-      households: [
-        ...b.households,
-        { id: crypto.randomUUID(), name: "", adults: 1, children: [] },
-      ],
+      households: [...b.households, { id, name: "", adults: 1, children: [] }],
     }));
   }
   function addChild(id: string) {
@@ -182,8 +202,9 @@ export default function MealSplitter() {
     }
   }
   function performAction(action: Action) {
-    if (action === "new") newBill();
-    else if (action === "copy") makeCopy();
+    if (action === "new") {
+      if (newBill()) setTitleOpen(false);
+    } else if (action === "copy") makeCopy();
     else if (action === "example") loadExample();
     else recover(action);
     setNotice("");
@@ -221,7 +242,7 @@ export default function MealSplitter() {
   const safeInput = (value: string, max = 1048576) => isSafeText(value, max);
   return (
     <>
-      <header className="site-header">
+      <header className={`site-header ${entry ? "entry-header" : ""}`}>
         <div className="header-inner">
           <a
             className="brand"
@@ -246,33 +267,64 @@ export default function MealSplitter() {
           </span>
         </div>
       </header>
-      <main>
-        <section className="hero">
-          <div className="eyebrow">
-            <span /> LESS MATH, MORE MEMORIES
-          </div>
-          <h1>
-            One table. <span>Everyone’s fair share.</span>
-          </h1>
-          <p>Split the bill fairly, even with little eaters!</p>
-          <div className="hero-bottom">
-            <span>
-              Big appetites or little bites. There’s room for everyone.
-            </span>
-            {!readOnly && (
-              <Button variant="ghost" onClick={() => requestAction("example")}>
-                <Sparkles size={15} /> Load Example Dinner{" "}
-                <ArrowUpRight size={14} />
-              </Button>
-            )}
-          </div>
-          <div className="hero-doodle" aria-hidden="true">
-            🍽️<span>♡</span>
-          </div>
-        </section>
+      <main className={entry ? "entry-main" : undefined}>
+        {!entry && (
+          <section className="hero">
+            <div className="eyebrow">
+              <span /> LESS MATH, MORE MEMORIES
+            </div>
+            <h1>
+              One table. <span>Everyone’s fair share.</span>
+            </h1>
+            <p>Split the bill fairly, even with little eaters!</p>
+            <div className="hero-bottom">
+              <span>
+                Big appetites or little bites. There’s room for everyone.
+              </span>
+              {!readOnly && (
+                <Button
+                  variant="ghost"
+                  onClick={() => requestAction("example")}
+                >
+                  <Sparkles size={15} /> Load Example Dinner{" "}
+                  <ArrowUpRight size={14} />
+                </Button>
+              )}
+            </div>
+            <div className="hero-doodle" aria-hidden="true">
+              🍽️<span>♡</span>
+            </div>
+          </section>
+        )}
+        {entry && (
+          <section className="entry-intro">
+            {/* A same-origin decorative photograph; never part of the reading order. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              className="entry-plate"
+              src={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/dinner-plate.webp`}
+              alt=""
+              width="540"
+              height="680"
+            />
+            <h1>
+              Let’s split
+              <br />
+              <span>dinner.</span>
+            </h1>
+            <p>
+              Start with the total. We’ll take
+              <br className="entry-copy-break" /> it from there.
+            </p>
+          </section>
+        )}
         {storageWarning && (
           <p role="status" className="warning">
-            {storageWarning}
+            {entry
+              ? blocked
+                ? "Your previous bill could not be restored. Its stored data is preserved. Edits stay in memory and may be lost on refresh or leaving. Use New bill to replace it deliberately."
+                : "Changes are not saved in this tab. Keep this page open; refreshing or leaving may lose edits. Your previously stored bill is preserved."
+              : storageWarning}
           </p>
         )}
         {actionWarning && (
@@ -289,7 +341,7 @@ export default function MealSplitter() {
             <Button onClick={() => requestAction("new")}>New bill</Button>
           </div>
         )}
-        {!linkError && ready && (
+        {!entry && !linkError && ready && (
           <section
             className={`shared-banner ${shared ? "" : "bill-status"}`}
             aria-label="Bill status"
@@ -334,6 +386,126 @@ export default function MealSplitter() {
             </div>
           </section>
         )}
+        {entry && (
+          <fieldset className="entry-fields editor-fields" disabled={!ready}>
+            <section aria-labelledby="entry-total-heading">
+              <div className="entry-total-heading">
+                <h2 id="entry-total-heading">
+                  <label htmlFor="bill-amount">Dinner total</label>
+                </h2>
+                {requiresReplacement && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => requestAction("new")}
+                  >
+                    New bill
+                  </Button>
+                )}
+              </div>
+              <div
+                className={`currency-input entry-amount ${cents === null ? "invalid" : ""}`}
+              >
+                <span aria-hidden="true">$</span>
+                <Input
+                  id="bill-amount"
+                  inputMode="decimal"
+                  value={bill.amount}
+                  onChange={(e) => {
+                    if (safeInput(e.target.value, 128))
+                      setBill({ ...bill, amount: e.target.value });
+                  }}
+                  onBlur={() => {
+                    if (cents !== null)
+                      setBill((b) => ({
+                        ...b,
+                        amount: (cents / 100).toFixed(2),
+                      }));
+                  }}
+                  aria-invalid={cents === null}
+                  aria-describedby={
+                    cents === null
+                      ? "bill-help entry-amount-error"
+                      : "bill-help"
+                  }
+                />
+                <span className="currency-code">USD</span>
+              </div>
+              <p id="bill-help" className="entry-helper">
+                Include tax and tip.
+              </p>
+              {cents === null && (
+                <p
+                  id="entry-amount-error"
+                  className="warning entry-validation"
+                  role="alert"
+                >
+                  Enter a positive dollar amount or zero, with up to two decimal
+                  places.
+                </p>
+              )}
+              <div className="entry-title">
+                <Button
+                  variant="ghost"
+                  className="entry-title-toggle"
+                  aria-expanded={titleExpanded}
+                  aria-controls="entry-title-field"
+                  onClick={() => {
+                    setTitleOpen(true);
+                    requestAnimationFrame(() => titleRef.current?.focus());
+                  }}
+                >
+                  <Pencil size={18} />{" "}
+                  {titleExpanded ? "Dinner name" : "Add a dinner name"}
+                </Button>
+                <div id="entry-title-field" hidden={!titleExpanded}>
+                  <label htmlFor="dinner-title" className="field-label">
+                    Dinner title
+                  </label>
+                  <Input
+                    ref={titleRef}
+                    onFocus={() => setTitleOpen(true)}
+                    id="dinner-title"
+                    className="dinner-title-input"
+                    value={bill.title}
+                    placeholder={DEFAULT_TITLE}
+                    onChange={(e) => {
+                      if (safeInput(e.target.value, 120))
+                        setBill({ ...bill, title: e.target.value });
+                    }}
+                    aria-describedby="title-help"
+                  />
+                  <p id="title-help" className="helper">
+                    Shown in your split, message, and shared dinner. Up to 120
+                    characters.
+                  </p>
+                </div>
+              </div>
+            </section>
+            <section
+              className="entry-joining"
+              aria-labelledby="joining-heading"
+            >
+              <h2 id="joining-heading">Who’s joining?</h2>
+              <p>Add the households at your table.</p>
+              <Button ref={addRef} className="entry-add" onClick={addHouse}>
+                <Plus size={24} /> Add a household
+              </Button>
+              <Button
+                variant="ghost"
+                className="entry-example"
+                onClick={() => requestAction("example")}
+              >
+                Try an example <ArrowUpRight size={19} />
+              </Button>
+            </section>
+            {hasCurrentBill && (
+              <p className="entry-save" role="status">
+                {saved ? "Saved in this tab." : "Not saved in this tab."}
+              </p>
+            )}
+          </fieldset>
+        )}
         {(recoveries.length > 0 || recoveryWarning) && (
           <details className="legacy-recovery">
             <summary>Recover an earlier bill</summary>
@@ -358,7 +530,7 @@ export default function MealSplitter() {
             ))}
           </details>
         )}
-        {!linkError && (
+        {!entry && !linkError && (
           <div className="workspace">
             <fieldset
               className="editor editor-fields"
@@ -507,6 +679,7 @@ export default function MealSplitter() {
                       </span>
                       <Input
                         readOnly={readOnly}
+                        id={`household-${h.id}`}
                         aria-label={`Household ${i + 1} name`}
                         placeholder={`Household ${i + 1}`}
                         value={h.name}
@@ -520,14 +693,16 @@ export default function MealSplitter() {
                         variant="ghost"
                         size="icon"
                         aria-label={`Remove ${householdName(h, i)}`}
-                        onClick={() =>
+                        onClick={() => {
+                          if (bill.households.length === 1)
+                            focusTarget.current = "entry";
                           setBill((b) => ({
                             ...b,
                             households: b.households.filter(
                               (x) => x.id !== h.id,
                             ),
-                          }))
-                        }
+                          }));
+                        }}
                       >
                         <Trash2 size={16} />
                       </Button>
@@ -932,17 +1107,19 @@ export default function MealSplitter() {
             </aside>
           </div>
         )}
-        <footer>
-          <span className="footer-brand">
-            <Utensils size={15} /> Family Meal Splitter
-          </span>
-          <span>
-            More togetherness. Less “who owes what?” <Heart size={13} />
-          </span>
-          <span>
-            <Leaf size={14} /> A little fairer, by design.
-          </span>
-        </footer>
+        {!entry && (
+          <footer>
+            <span className="footer-brand">
+              <Utensils size={15} /> Family Meal Splitter
+            </span>
+            <span>
+              More togetherness. Less “who owes what?” <Heart size={13} />
+            </span>
+            <span>
+              <Leaf size={14} /> A little fairer, by design.
+            </span>
+          </footer>
+        )}
       </main>
       {notice && (
         <div role="status" className="toast">
@@ -966,7 +1143,9 @@ export default function MealSplitter() {
             {blocked
               ? "Your previous bill could not be read. This action may replace its stored record. "
               : "This replaces your current bill in this tab. "}
-            Keep its share link first if you want to return to it.
+            {entry
+              ? "Changes that have not been saved may be lost. Keep my bill cancels without replacing stored data."
+              : "Keep its share link first if you want to return to it."}
           </p>
           <div>
             <Button
